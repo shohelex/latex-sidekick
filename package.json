@@ -197,6 +197,17 @@
           "description": "Also list overfull/underfull box notes (shown as information, not warnings)."
         }
       }
+    },
+    "configurationDefaults": {
+      "[latex]": {
+        "editor.wordWrap": "on",
+        "editor.wrappingIndent": "same",
+        "editor.lineNumbers": "on"
+      },
+      "[tex]": {
+        "editor.wordWrap": "on",
+        "editor.wrappingIndent": "same"
+      }
     }
   },
   "scripts": {

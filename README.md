@@ -11,6 +11,7 @@ Press `Ctrl+S` and it builds with `latexmk` (inside WSL on Windows, or natively 
 - **Side-by-side PDF preview** with zoom and fit-width. It keeps your scroll position between builds.
 - **Click to jump (SyncTeX):** double-click the PDF to open the matching source line; `Ctrl+Alt+J` highlights the current source line in the PDF.
 - **Citations:** search your `.bib` files (`Ctrl+Alt+C`), `\cite{` and `\ref{` autocomplete, hover to see a reference, and "Add Reference by DOI" (fetches BibTeX from doi.org).
+- **Word wrap on by default** for `.tex` files, so long lines flow onto the next line like in Overleaf (turn it off with `"[latex]": { "editor.wordWrap": "off" }` in your settings).
 - **Outline, word count, snippets,** an insert menu for symbols and environments, and `Ctrl+B` / `Ctrl+I` for bold and italic.
 - **Optional Claude writing assistant** (`Ctrl+Alt+I`): rewrite, shorten or fix the selected text. Undo restores the original.
 
