@@ -39,3 +39,45 @@ test('wslToWin and stripFences', () => {
   assert.strictEqual(p.stripFences('```latex\nfoo\n```'), 'foo');
   assert.strictEqual(p.stripFences('foo'), 'foo');
 });
+
+test('parseLog: errors, warnings, typesetting notes and hints', () => {
+  const log = [
+    './main.tex:12: Undefined control sequence.',
+    'l.12 \\foo',
+    '',
+    "LaTeX Warning: Citation `smith' on page 1 undefined on input line 20.",
+    '',
+    "LaTeX Warning: Reference `fig:a' on page 2 undefined on input line 31.",
+    '',
+    'LaTeX Warning: There were undefined references.',
+    'Overfull \\hbox (12.5pt too wide) in paragraph at lines 40--41',
+    'Package hyperref Warning: Token not allowed in a PDF string (Unicode):',
+    '(hyperref)                removing `math shift\' on input line 9.',
+    "./main.tex:5: LaTeX Error: File `foo.sty' not found.",
+  ].join('\n');
+  const r = p.parseLog(log);
+  const by = (sev) => r.filter((x) => x.severity === sev);
+  assert.strictEqual(by('error').length, 2);
+  assert.deepStrictEqual([by('error')[0].file, by('error')[0].line], ['main.tex', 12]);
+  assert.match(by('error')[0].hint, /misspelled/);
+  assert.match(by('error')[1].message, /foo\.sty/);
+  assert.match(by('error')[1].hint, /missing/i);
+  assert.strictEqual(by('warning').length, 3);
+  assert.strictEqual(by('warning')[0].line, 20);
+  assert.ok(!by('warning').some((w) => /There were undefined/.test(w.message)));
+  assert.match(by('warning')[2].message, /hyperref/);
+  assert.strictEqual(by('info')[0].line, 40);
+});
+
+test('parseLog: classic "!" errors without file-line-error', () => {
+  const r = p.parseLog('! Missing $ inserted.\n<inserted text> \n                $\nl.7 a_b\n');
+  assert.strictEqual(r[0].line, 7);
+  assert.match(r[0].hint, /math mode/);
+});
+
+test('diagnoseSetup', () => {
+  assert.match(p.diagnoseSetup('Failed to start wsl.exe: spawn'), /WSL/);
+  assert.match(p.diagnoseSetup('sh: 1: latexmk: not found'), /latexmk was not found/);
+  assert.match(p.diagnoseSetup('[build timed out]'), /timed out/);
+  assert.strictEqual(p.diagnoseSetup('all fine'), undefined);
+});

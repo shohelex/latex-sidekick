@@ -5,8 +5,24 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src {{csp}} data:; script-src {{csp}}; style-src 'unsafe-inline'; worker-src {{csp}} blob:; connect-src {{csp}} blob: data:;">
 <style>
   body { margin: 0; background: var(--vscode-editor-background); }
-  #bar { position: sticky; top: 0; z-index: 2; display: flex; gap: 6px; align-items: center; padding: 4px 8px;
+  #top { position: sticky; top: 0; z-index: 2; }
+  #bar { display: flex; gap: 6px; align-items: center; padding: 4px 8px;
          background: var(--vscode-editorWidget-background); color: var(--vscode-foreground); font: 12px sans-serif; }
+  #banner { display: none; padding: 4px 8px; font: 12px sans-serif; background: var(--vscode-inputValidation-warningBackground);
+            color: var(--vscode-foreground); border-bottom: 1px solid var(--vscode-inputValidation-warningBorder); }
+  #issues { display: none; max-height: 40vh; overflow: auto; background: var(--vscode-editor-background);
+            border-bottom: 1px solid var(--vscode-panel-border); font: 12px sans-serif; color: var(--vscode-foreground); }
+  .issue { padding: 5px 8px; cursor: pointer; border-left: 3px solid transparent; }
+  .issue:hover { background: var(--vscode-list-hoverBackground); }
+  .issue.error { border-left-color: var(--vscode-errorForeground); }
+  .issue.warning { border-left-color: var(--vscode-editorWarning-foreground); }
+  .issue.info { border-left-color: var(--vscode-editorInfo-foreground); opacity: .85; }
+  .issue .msg { font-weight: 600; }
+  .issue .loc { color: var(--vscode-descriptionForeground); margin-left: 6px; }
+  .issue .hint { color: var(--vscode-descriptionForeground); margin-top: 2px; }
+  #none { padding: 8px; color: var(--vscode-descriptionForeground); }
+  #bar .spacer { flex: 1; }
+  #bar .bad { color: var(--vscode-errorForeground); } #bar .warn { color: var(--vscode-editorWarning-foreground); }
   #bar button { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground);
                 border: 0; padding: 2px 8px; cursor: pointer; }
   #pages { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px; }
@@ -17,9 +33,16 @@
 </style>
 </head>
 <body data-worker="{{worker}}">
-  <div id="bar">
-    <button id="out">−</button><span id="zoom">100%</span><button id="in">+</button>
-    <button id="fit">Fit width</button><span id="info"></span>
+  <div id="top">
+    <div id="bar">
+      <button id="out">−</button><span id="zoom">100%</span><button id="in">+</button>
+      <button id="fit">Fit width</button><span id="info"></span>
+      <span class="spacer"></span>
+      <button id="issuesBtn" title="Show errors and warnings">Issues</button>
+      <button id="logBtn" title="Open the full build log">Log</button>
+    </div>
+    <div id="banner"></div>
+    <div id="issues"></div>
   </div>
   <div id="pages"><div id="empty">Save a .tex file (Ctrl+S) to build and see the PDF here. Double-click the PDF to jump to the source.</div></div>
   <script src="{{pdfjs}}"></script>

@@ -11,6 +11,8 @@ let lastPdf;
 let lastMain;
 
 const { runTool, cfg } = require('./exec');
+const { parseLog, diagnoseSetup } = require('./parse');
+let lastIssues;
 const synctex = require('./synctex');
 
 function resolveMain(doc) {
@@ -25,24 +27,40 @@ function resolveMain(doc) {
 function runLatexmk(main) {
   const engine = { pdflatex: '-pdf', xelatex: '-xelatex', lualatex: '-lualatex' }[cfg().get('engine')];
   const args = [engine, '-interaction=nonstopmode', '-file-line-error', '-synctex=1', `-output-directory=${cfg().get('outDir')}`, path.basename(main)];
-  return runTool('latexmk', args, path.dirname(main), (s) => output.append(s));
+  return runTool('latexmk', args, path.dirname(main), (s) => output.append(s), cfg().get('buildTimeoutSeconds') * 1000);
 }
 
-function publishDiagnostics(log, main) {
+const SEVERITY = {
+  error: vscode.DiagnosticSeverity.Error,
+  warning: vscode.DiagnosticSeverity.Warning,
+  info: vscode.DiagnosticSeverity.Information,
+};
+
+/** Read the .log latexmk wrote (more complete than its console output); fall back to the console text. */
+function readIssues(main, consoleLog) {
+  const logFile = path.join(path.dirname(main), cfg().get('outDir'), path.basename(main).replace(/\.tex$/i, '.log'));
+  let text = consoleLog;
+  try { text = fs.readFileSync(logFile, 'utf8'); } catch { /* use console output */ }
+  const showTypesetting = cfg().get('showTypesettingNotes');
+  return parseLog(text)
+    .filter((it) => showTypesetting || it.kind !== 'typesetting')
+    .map((it) => ({ ...it, path: path.resolve(path.dirname(main), it.file || path.basename(main)) }));
+}
+
+function publishIssues(issues) {
   diagnostics.clear();
   const byFile = new Map();
-  const re = /^(.+?\.tex):(\d+): (.*)$/gm;
-  let m;
-  while ((m = re.exec(log))) {
-    const file = path.resolve(path.dirname(main), m[1]);
-    const line = Math.max(0, parseInt(m[2], 10) - 1);
-    const d = new vscode.Diagnostic(new vscode.Range(line, 0, line, 1000), m[3], vscode.DiagnosticSeverity.Error);
+  for (const it of issues) {
+    const line = Math.max(0, (it.line || 1) - 1);
+    const d = new vscode.Diagnostic(new vscode.Range(line, 0, line, 1000), it.hint ? `${it.message}\n→ ${it.hint}` : it.message, SEVERITY[it.severity]);
     d.source = 'latex';
-    if (!byFile.has(file)) byFile.set(file, []);
-    byFile.get(file).push(d);
+    if (!byFile.has(it.path)) byFile.set(it.path, []);
+    byFile.get(it.path).push(d);
   }
   for (const [f, ds] of byFile) diagnostics.set(vscode.Uri.file(f), ds);
 }
+
+const countOf = (issues, sev) => issues.filter((i) => i.severity === sev).length;
 
 async function compile(doc) {
   doc = doc || (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document);
@@ -62,14 +80,32 @@ async function compile(doc) {
     { location: vscode.ProgressLocation.Notification, title: 'LaTeX: building ' + path.basename(main) + '…' },
     () => runLatexmk(main));
   const secs = ((Date.now() - t0) / 1000).toFixed(1);
-  publishDiagnostics(log, main);
+  const issues = readIssues(main, log);
+  publishIssues(issues);
+  const errors = countOf(issues, 'error');
+  const warnings = countOf(issues, 'warning');
+  const setupProblem = !errors && !ok ? diagnoseSetup(log) : undefined;
   const pdf = path.join(path.dirname(main), cfg().get('outDir'), path.basename(main).replace(/\.tex$/i, '.pdf'));
-  if (fs.existsSync(pdf)) { lastPdf = pdf; lastMain = main; sendPdf(); }
+  const havePdf = fs.existsSync(pdf);
+  if (havePdf && !setupProblem) { lastPdf = pdf; lastMain = main; }
+  lastIssues = { issues, ok: ok && !errors, secs, stale: !ok || errors > 0 };
+  sendIssues();
+  if (lastPdf) sendPdf();
   const stamp = new Date().toLocaleTimeString();
-  setStatus(ok ? '$(check) LaTeX built ' + stamp : '$(error) LaTeX failed', ok ? 'Built in ' + secs + 's at ' + stamp : 'Compile errors — see Problems');
-  if (ok) vscode.window.setStatusBarMessage('$(check) Build complete (' + secs + 's)', 5000);
-  else vscode.window.showErrorMessage('LaTeX build failed — see Problems / Output.');
-  if (!ok) output.show(true);
+  const counts = `${errors} error${errors === 1 ? '' : 's'}, ${warnings} warning${warnings === 1 ? '' : 's'}`;
+  if (ok && !errors) {
+    setStatus((warnings ? '$(warning) ' : '$(check) ') + counts, `Built in ${secs}s at ${stamp}. Click to build again.`);
+    vscode.window.setStatusBarMessage('$(check) Build complete (' + secs + 's)', 5000);
+  } else {
+    setStatus('$(error) ' + counts, `Build failed at ${stamp}. Click to build again.`);
+    const text = setupProblem || (errors ? `LaTeX build failed: ${counts}.` : 'LaTeX build failed without a recognisable error. See the log.');
+    // Not awaited: a toast left open must not block the next build.
+    vscode.window.showErrorMessage(text, 'Show log', ...(setupProblem ? ['Open settings'] : ['Show problems'])).then((choice) => {
+      if (choice === 'Show log') output.show(true);
+      else if (choice === 'Open settings') vscode.commands.executeCommand('workbench.action.openSettings', 'latexEditor');
+      else if (choice === 'Show problems') vscode.commands.executeCommand('workbench.actions.view.problems');
+    });
+  }
   running = false;
   if (queued) { const q = queued; queued = false; compile(q); }
 }
@@ -82,6 +118,10 @@ function setStatus(text, tip) {
 function sendPdf() {
   if (!panel || !lastPdf || !fs.existsSync(lastPdf)) return;
   panel.webview.postMessage({ type: 'pdf', data: fs.readFileSync(lastPdf).toString('base64') });
+}
+
+function sendIssues() {
+  if (panel && lastIssues) panel.webview.postMessage({ type: 'issues', ...lastIssues });
 }
 
 function openPreview(context) {
@@ -100,7 +140,16 @@ function openPreview(context) {
     .replace('{{worker}}', u('pdf.worker.min.js').toString())
     .replace('{{script}}', u('preview.js').toString());
   w.html = html;
-  w.onDidReceiveMessage((msg) => { if (msg.type === 'ready') sendPdf(); if (msg.type === 'error') output.appendLine('[preview] ' + msg.message);
+  w.onDidReceiveMessage((msg) => {
+    if (msg.type === 'ready') { sendPdf(); sendIssues(); }
+    if (msg.type === 'error') output.appendLine('[preview] ' + msg.message);
+    if (msg.type === 'goto') {
+      vscode.workspace.openTextDocument(msg.path).then((d) => {
+        const pos = new vscode.Position(Math.max(0, (msg.line || 1) - 1), 0);
+        return vscode.window.showTextDocument(d, { viewColumn: vscode.ViewColumn.One, selection: new vscode.Range(pos, pos) });
+      }, () => vscode.window.showWarningMessage('Could not open ' + msg.path));
+    }
+    if (msg.type === 'showLog') output.show(true);
     if (msg.type === 'reverse' && lastMain) {
       synctex.reverse(msg.page, msg.x, msg.y, path.dirname(lastMain), lastPdf).then((ok) => { if (!ok) vscode.window.setStatusBarMessage('No source location for that spot', 3000); });
     }
@@ -118,6 +167,7 @@ function activate(context) {
   require('./ai').register(context);
   context.subscriptions.push(output, diagnostics, status,
     vscode.commands.registerCommand('latexEditor.compile', () => compile()),
+    vscode.commands.registerCommand('latexEditor.showLog', () => output.show(true)),
     vscode.commands.registerCommand('latexEditor.openPreview', () => {
       openPreview(context);
       const ed = vscode.window.activeTextEditor;

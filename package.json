@@ -57,6 +57,10 @@
       {
         "command": "latexEditor.ai.setApiKey",
         "title": "LaTeX Editor: Set Anthropic API Key"
+      },
+      {
+        "command": "latexEditor.showLog",
+        "title": "LaTeX Editor: Show Build Log"
       }
     ],
     "menus": {
@@ -180,6 +184,17 @@
           "type": "string",
           "default": "claude-sonnet-5-5",
           "description": "Claude model used by the writing assistant. Only the text you select is sent, and only when you run the command."
+        },
+        "latexEditor.buildTimeoutSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 10,
+          "description": "Stop a build that runs longer than this (an infinite loop in the document is the usual cause)."
+        },
+        "latexEditor.showTypesettingNotes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Also list overfull/underfull box notes (shown as information, not warnings)."
         }
       }
     }

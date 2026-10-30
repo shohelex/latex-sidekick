@@ -87,9 +87,54 @@
   document.getElementById('fit').onclick = () => { fitWidth = true; render(); };
   window.addEventListener('resize', () => { if (fitWidth) render(); });
 
+  // ---- Issues list (errors / warnings / typesetting notes) ----
+  const issuesEl = document.getElementById('issues');
+  const bannerEl = document.getElementById('banner');
+  const issuesBtn = document.getElementById('issuesBtn');
+  let issuesOpen = null;   // null = automatic: open when there are errors
+
+  const el = (tag, cls, text) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;   // textContent only: log text is untrusted
+    return n;
+  };
+
+  function showIssues(m) {
+    const list = m.issues || [];
+    const n = (s) => list.filter((i) => i.severity === s).length;
+    const errors = n('error'), warnings = n('warning'), notes = n('info');
+    issuesBtn.textContent = 'Issues: ' + errors + ' ✗  ' + warnings + ' ⚠' + (notes ? '  ' + notes + ' ℹ' : '');
+    issuesBtn.className = errors ? 'bad' : warnings ? 'warn' : '';
+    bannerEl.style.display = m.stale ? 'block' : 'none';
+    bannerEl.textContent = m.stale ? 'Build failed — showing the last successful PDF. Fix the errors below and save again.' : '';
+    issuesEl.replaceChildren();
+    if (!list.length) issuesEl.appendChild(el('div', null, 'No errors or warnings.')).id = 'none';
+    const order = { error: 0, warning: 1, info: 2 };
+    [...list].sort((a, b) => order[a.severity] - order[b.severity]).forEach((it) => {
+      const row = el('div', 'issue ' + it.severity);
+      const head = el('div');
+      head.appendChild(el('span', 'msg', it.message));
+      const where = (it.file || '') + (it.line ? ':' + it.line : '');
+      if (where) head.appendChild(el('span', 'loc', where));
+      row.appendChild(head);
+      if (it.hint) row.appendChild(el('div', 'hint', it.hint));
+      row.onclick = () => vscode.postMessage({ type: 'goto', path: it.path, line: it.line });
+      issuesEl.appendChild(row);
+    });
+    const open = issuesOpen === null ? errors > 0 : issuesOpen;
+    issuesEl.style.display = open ? 'block' : 'none';
+  }
+  issuesBtn.onclick = () => {
+    issuesOpen = issuesEl.style.display === 'none';
+    issuesEl.style.display = issuesOpen ? 'block' : 'none';
+  };
+  document.getElementById('logBtn').onclick = () => vscode.postMessage({ type: 'showLog' });
+
   window.addEventListener('message', async (e) => {
     const m = e.data;
     if (m.type === 'highlight') { highlight(m.rect); return; }
+    if (m.type === 'issues') { showIssues(m); return; }
     if (m.type !== 'pdf') return;
     try {
       const bin = atob(m.data);

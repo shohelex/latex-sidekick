@@ -1,0 +1,7 @@
+node_modules/**
+test/**
+sample/**
+.vscode/**
+.gitignore
+**/*.vsix
+**/.latex-build/**
