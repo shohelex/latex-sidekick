@@ -201,14 +201,26 @@
     "configurationDefaults": {
       "[latex]": {
         "editor.wordWrap": "on",
-        "editor.wrappingIndent": "same",
-        "editor.lineNumbers": "on"
+        "editor.wrappingIndent": "indent",
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true,
+        "editor.detectIndentation": false,
+        "editor.autoIndent": "full"
       },
       "[tex]": {
         "editor.wordWrap": "on",
-        "editor.wrappingIndent": "same"
+        "editor.wrappingIndent": "indent",
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true,
+        "editor.detectIndentation": false
       }
-    }
+    },
+    "languages": [
+      {
+        "id": "latex",
+        "configuration": "./language-configuration.json"
+      }
+    ]
   },
   "scripts": {
     "test": "node --test test/parse.test.js",

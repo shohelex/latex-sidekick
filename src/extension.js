@@ -13,7 +13,7 @@ let lastMain;
 const { runTool, cfg } = require('./exec');
 const { parseLog, diagnoseSetup } = require('./parse');
 let lastIssues;
-const previewState = { rendered: null, errors: [] };   // what the preview panel reported back (used by the integration test)
+const previewState = { rendered: null, errors: [], renders: 0, pong: null };   // what the preview panel reported back (used by the integration test)
 const synctex = require('./synctex');
 
 function resolveMain(doc) {
@@ -76,6 +76,7 @@ async function compile(doc) {
   output.clear();
   output.appendLine(`> compiling ${main}`);
   setStatus('$(sync~spin) LaTeX', 'Compiling…');
+  sendBusy('Building ' + path.basename(main) + '… (the first build can take a few seconds while WSL starts)');
   const t0 = Date.now();
   const { ok, log } = await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'LaTeX: building ' + path.basename(main) + '…' },
@@ -116,12 +117,27 @@ function setStatus(text, tip) {
   status.text = text; status.tooltip = tip; status.show();
 }
 
-function sendPdf() {
+let lastSent = '';
+/** Send the PDF to the preview; skipped when it has not changed since the last send (unless forced). */
+function sendPdf(force) {
   if (!panel || !lastPdf || !fs.existsSync(lastPdf)) return;
+  const st = fs.statSync(lastPdf);
+  const stamp = `${lastPdf}|${st.mtimeMs}|${st.size}`;
+  if (!force && stamp === lastSent) return;
+  lastSent = stamp;
   panel.webview.postMessage({ type: 'pdf', data: fs.readFileSync(lastPdf).toString('base64') });
 }
 
+let busyText = '';
+function sendBusy(text) {
+  busyText = text;
+  if (panel) panel.webview.postMessage({ type: 'status', text });
+}
+
+const outputPdf = (main) => path.join(path.dirname(main), cfg().get('outDir'), path.basename(main).replace(/\.tex$/i, '.pdf'));
+
 function sendIssues() {
+  busyText = '';
   if (panel && lastIssues) panel.webview.postMessage({ type: 'issues', ...lastIssues });
 }
 
@@ -142,9 +158,10 @@ function openPreview(context) {
     .replace('{{script}}', u('preview.js').toString());
   w.html = html;
   w.onDidReceiveMessage((msg) => {
-    if (msg.type === 'ready') { sendPdf(); sendIssues(); }
+    if (msg.type === 'ready') { sendPdf(true); if (busyText) sendBusy(busyText); else sendIssues(); }
     if (msg.type === 'error') { previewState.errors.push(msg.message); output.appendLine('[preview] ' + msg.message); }
-    if (msg.type === 'rendered') previewState.rendered = { pages: msg.pages, width: msg.width, height: msg.height };
+    if (msg.type === 'rendered') { previewState.rendered = { pages: msg.pages, width: msg.width, height: msg.height, ms: msg.ms }; previewState.renders++; }
+    if (msg.type === 'pong') previewState.pong = msg;
     if (msg.type === 'goto') {
       vscode.workspace.openTextDocument(msg.path).then((d) => {
         const pos = new vscode.Position(Math.max(0, (msg.line || 1) - 1), 0);
@@ -156,7 +173,7 @@ function openPreview(context) {
       synctex.reverse(msg.page, msg.x, msg.y, path.dirname(lastMain), lastPdf).then((ok) => { if (!ok) vscode.window.setStatusBarMessage('No source location for that spot', 3000); });
     }
   });
-  panel.onDidDispose(() => { panel = undefined; });
+  panel.onDidDispose(() => { panel = undefined; lastSent = ''; });
 }
 
 function activate(context) {
@@ -171,10 +188,17 @@ function activate(context) {
     vscode.commands.registerCommand('latexEditor.compile', () => compile()),
     vscode.commands.registerCommand('latexEditor.showLog', () => output.show(true)),
     vscode.commands.registerCommand('latexEditor._state', () => ({ previewState, lastIssues, lastPdf, lastMain, panelOpen: !!panel })),
+    // Test hooks (not listed in package.json): ping the preview to measure responsiveness.
+    vscode.commands.registerCommand('latexEditor._ping', () => { previewState.pong = null; if (panel) panel.webview.postMessage({ type: 'ping', t: Date.now() }); }),
     vscode.commands.registerCommand('latexEditor.openPreview', () => {
       openPreview(context);
       const ed = vscode.window.activeTextEditor;
-      if (ed) compile(ed.document);
+      if (!ed) return;
+      // Show the PDF from the last build straight away; a rebuild (slow while WSL starts) then refreshes it.
+      const existing = outputPdf(resolveMain(ed.document));
+      if (fs.existsSync(existing)) { lastPdf = existing; lastMain = resolveMain(ed.document); sendPdf(true); }
+      else sendBusy('Building ' + path.basename(ed.document.fileName) + '… (the first build can take a few seconds while WSL starts)');
+      compile(ed.document);
     }),
     vscode.commands.registerCommand('latexEditor.syncToPdf', async () => {
       const ed = vscode.window.activeTextEditor;

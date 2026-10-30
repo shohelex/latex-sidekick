@@ -1,0 +1,28 @@
+{
+  "comments": { "lineComment": "%" },
+  "brackets": [["{", "}"], ["[", "]"], ["(", ")"]],
+  "autoClosingPairs": [
+    { "open": "{", "close": "}" },
+    { "open": "[", "close": "]" },
+    { "open": "(", "close": ")" },
+    { "open": "$", "close": "$", "notIn": ["string"] },
+    { "open": "`", "close": "'", "notIn": ["string", "comment"] }
+  ],
+  "surroundingPairs": [["{", "}"], ["[", "]"], ["(", ")"], ["$", "$"], ["`", "'"]],
+  "indentationRules": {
+    "increaseIndentPattern": "^\\s*\\\\begin\\{(?!document\\b)[^}]+\\}",
+    "decreaseIndentPattern": "^\\s*\\\\end\\{(?!document\\b)[^}]+\\}"
+  },
+  "onEnterRules": [
+    {
+      "beforeText": "^\\s*\\\\begin\\{(?!document\\b)[^}]+\\}.*$",
+      "afterText": "^\\s*\\\\end\\{[^}]+\\}",
+      "action": { "indent": "indentOutdent" }
+    },
+    {
+      "beforeText": "^\\s*\\\\begin\\{(?!document\\b)[^}]+\\}.*$",
+      "action": { "indent": "indent" }
+    }
+  ],
+  "wordPattern": "\\\\?[A-Za-z@]+\\*?|-?\\d+(?:\\.\\d+)?"
+}

@@ -86,6 +86,60 @@ test('outline lists sections', async () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+
+async function typeText(text) {
+  for (const ch of text) await vscode.commands.executeCommand('type', { text: ch });
+}
+
+test('auto-indent: Enter after \\begin indents, and \\end moves back', async () => {
+  const doc = await vscode.workspace.openTextDocument({ language: 'latex', content: '\\begin{itemize}' });
+  const ed = await vscode.window.showTextDocument(doc);
+  const end = doc.lineAt(0).range.end;
+  ed.selection = new vscode.Selection(end, end);
+  await typeText('\n');
+  await typeText('\\item one\n');
+  assert.ok(/^ {2}\\item one$/.test(doc.lineAt(1).text), 'item not indented: ' + JSON.stringify(doc.lineAt(1).text));
+  await typeText('\\end{itemize}');
+  // (typing "{" auto-closes it, so a stray "}" after the command is expected in this synthetic test)
+  assert.ok(doc.lineAt(2).text.startsWith('\\end{itemize}'), '\\end not outdented: ' + JSON.stringify(doc.lineAt(2).text));
+});
+
+test('auto-indent: Enter between \\begin and \\end puts the cursor on an indented line', async () => {
+  const doc = await vscode.workspace.openTextDocument({ language: 'latex', content: '\\begin{equation}\\end{equation}' });
+  const ed = await vscode.window.showTextDocument(doc);
+  const pos = new vscode.Position(0, '\\begin{equation}'.length);
+  ed.selection = new vscode.Selection(pos, pos);
+  await typeText('\n');
+  const got = JSON.stringify(doc.getText());
+  assert.strictEqual(doc.lineCount, 3, 'expected 3 lines, got ' + got);
+  assert.strictEqual(doc.lineAt(1).text, '  ', 'middle line wrong: ' + got);
+  assert.strictEqual(doc.lineAt(2).text, '\\end{equation}', 'end line wrong: ' + got);
+});
+
+test('a 60-page paper renders without freezing the viewer', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sidekick-big-'));
+  const file = path.join(dir, 'main.tex');
+  const para = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. '.repeat(40);
+  let body = '';
+  for (let i = 1; i <= 60; i++) body += '\\section{Part ' + i + '}\n' + para + '\n\\newpage\n';
+  fs.writeFileSync(file, '\\documentclass{article}\n\\begin{document}\n' + body + '\\end{document}\n');
+  const doc = await vscode.workspace.openTextDocument(file);
+  await vscode.window.showTextDocument(doc);
+  await vscode.commands.executeCommand('latexEditor.openPreview');
+  await vscode.commands.executeCommand('latexEditor.compile');
+  const tBuilt = Date.now();
+  const s = await until(async () => { const x = await state(); return x.previewState.rendered && x.previewState.rendered.pages >= 60 ? x : null; }, 120000, 'all 60 pages to render');
+  console.log('         build done -> all pages shown after ' + (Date.now() - tBuilt) + ' ms');
+  console.log('         first render of 60 pages took ' + s.previewState.rendered.ms + ' ms');
+  // Is the viewer still responsive right after rendering?
+  await vscode.commands.executeCommand('latexEditor._ping');
+  const t0 = Date.now();
+  const p = await until(async () => (await state()).previewState.pong, 5000, 'preview to answer a ping');
+  console.log('         ping answered in ' + (Date.now() - t0) + ' ms');
+  assert.ok(s.previewState.rendered.pages >= 60);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 async function run() {
   let failed = 0;
   for (const [name, fn] of tests) {

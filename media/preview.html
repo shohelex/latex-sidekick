@@ -10,6 +10,9 @@
          background: var(--vscode-editorWidget-background); color: var(--vscode-foreground); font: 12px sans-serif; }
   #banner { display: none; padding: 4px 8px; font: 12px sans-serif; background: var(--vscode-inputValidation-warningBackground);
             color: var(--vscode-foreground); border-bottom: 1px solid var(--vscode-inputValidation-warningBorder); }
+  #banner[data-kind="busy"] { background: var(--vscode-editorInfo-background, var(--vscode-editorWidget-background));
+            border-bottom-color: var(--vscode-editorInfo-foreground); }
+  #banner[data-kind="busy"]::before { content: "⟳ "; }
   #issues { display: none; max-height: 40vh; overflow: auto; background: var(--vscode-editor-background);
             border-bottom: 1px solid var(--vscode-panel-border); font: 12px sans-serif; color: var(--vscode-foreground); }
   .issue { padding: 5px 8px; cursor: pointer; border-left: 3px solid transparent; }

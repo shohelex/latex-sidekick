@@ -3,6 +3,7 @@
   const pagesEl = document.getElementById('pages');
   const zoomEl = document.getElementById('zoom');
   const infoEl = document.getElementById('info');
+  const bannerEl = document.getElementById('banner');
 
   const show = (m) => {
     pagesEl.replaceChildren(Object.assign(document.createElement('pre'), { textContent: m, style: 'color:#f88;padding:12px;white-space:pre-wrap' }));
@@ -16,55 +17,120 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([t], { type: 'text/javascript' }));
   });
 
+  const dpr = window.devicePixelRatio || 1;
   let doc = null;
+  let sizes = [];            // page sizes at scale 1 (PDF points)
+  let pages = [];            // { n, el, scale, w, h, canvas, state, stale, near, task, gen }
+  let docGen = 0;            // bumps whenever the document or layout changes
   let scale = (vscode.getState() || {}).scale || 1.2;
   let fitWidth = false;
-  let renderId = 0;
-  let pending = null;   // highlight to apply once pages exist
+  let pending = null;        // highlight to apply once pages exist
+  let reported = false;
+  let t0 = 0;
 
-  async function render() {
-    if (!doc) return;
-    const id = ++renderId;
-    const keep = window.scrollY / Math.max(1, document.body.scrollHeight);
-    const dpr = window.devicePixelRatio || 1;
-    const frag = document.createDocumentFragment();
-    for (let n = 1; n <= doc.numPages; n++) {
-      const page = await doc.getPage(n);
-      if (id !== renderId) return;
-      const s = fitWidth ? (window.innerWidth - 32) / page.getViewport({ scale: 1 }).width : scale;
-      const vp = page.getViewport({ scale: s * dpr });
-      const wrap = document.createElement('div');
-      wrap.className = 'page';
-      wrap.dataset.page = n;
-      wrap.dataset.scale = s;
-      const c = document.createElement('canvas');
-      c.width = vp.width; c.height = vp.height;
-      c.style.width = vp.width / dpr + 'px'; c.style.height = vp.height / dpr + 'px';
-      wrap.appendChild(c);
-      await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
-      if (id !== renderId) return;
-      frag.appendChild(wrap);
-      if (n === 1) zoomEl.textContent = Math.round(s * 100) + '%';
+  // Pages are laid out as empty, correctly sized boxes straight away; only pages near the viewport are drawn.
+  // This keeps long papers responsive: the first page appears at once instead of after every page is drawn.
+  const observer = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      const pg = e.target._pg;
+      if (!pg) continue;
+      pg.near = e.isIntersecting;
+      if (pg.near) paint(pg); else release(pg);
     }
-    pagesEl.replaceChildren(frag);
+  }, { rootMargin: '1200px 0px' });
+
+  const scaleFor = (n) => (fitWidth ? Math.max(0.2, (window.innerWidth - 32) / sizes[n - 1].w) : scale);
+
+  async function paint(pg) {
+    if (!doc) return;
+    if (pg.state === 'painting') { pg.again = true; return; }
+    if (pg.state === 'done' && !pg.stale) return;
+    const gen = pg.gen = docGen;
+    pg.state = 'painting';
+    pg.stale = false;
+    try {
+      const page = await doc.getPage(pg.n);
+      const vp = page.getViewport({ scale: pg.scale * dpr });
+      const c = document.createElement('canvas');
+      c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+      c.style.width = pg.w + 'px'; c.style.height = pg.h + 'px';
+      pg.task = page.render({ canvasContext: c.getContext('2d'), viewport: vp });
+      await pg.task.promise;
+      pg.task = null;
+      if (gen !== docGen || !pg.near) { pg.state = 'empty'; }
+      else {
+        if (pg.canvas) pg.canvas.replaceWith(c); else pg.el.insertBefore(c, pg.el.firstChild);
+        pg.canvas = c;
+        pg.state = 'done';
+        if (!reported) {
+          reported = true;
+          vscode.postMessage({ type: 'rendered', pages: doc.numPages, width: c.width, height: c.height, ms: Math.round(performance.now() - t0) });
+        }
+      }
+    } catch (err) {
+      pg.state = 'empty';
+      pg.task = null;
+      if (!err || err.name !== 'RenderingCancelledException') show('Could not draw page ' + pg.n + ': ' + (err && err.message || err));
+    }
+    if ((pg.again || pg.state === 'empty' || pg.stale) && pg.near && doc) { pg.again = false; paint(pg); }
+  }
+
+  function release(pg) {
+    if (pg.task) { try { pg.task.cancel(); } catch { /* already finished */ } }
+    if (pg.canvas && pg.state === 'done') { pg.canvas.remove(); pg.canvas = null; pg.state = 'empty'; }
+  }
+
+  async function layout() {
+    if (!doc) return;
+    const gen = ++docGen;
+    const keep = window.scrollY / Math.max(1, document.body.scrollHeight);
+    pages.forEach((p) => p.task && p.task.cancel());
+    // Read page sizes (cheap: no drawing).
+    if (sizes.length !== doc.numPages) {
+      sizes = [];
+      for (let n = 1; n <= doc.numPages; n++) {
+        const vp = (await doc.getPage(n)).getViewport({ scale: 1 });
+        sizes.push({ w: vp.width, h: vp.height });
+        if (gen !== docGen) return;
+      }
+    }
+    const same = pages.length === doc.numPages && pages.every((p) => Math.abs(p.scale - scaleFor(p.n)) < 1e-6);
+    if (same) {
+      pages.forEach((p) => { p.stale = true; if (p.near) paint(p); });     // redraw in place: no flash, no scroll jump
+    } else {
+      observer.disconnect();
+      pages = sizes.map((s, i) => {
+        const n = i + 1, sc = scaleFor(n);
+        const el = document.createElement('div');
+        el.className = 'page';
+        el.dataset.page = n; el.dataset.scale = sc;
+        const w = Math.round(s.w * sc), h = Math.round(s.h * sc);
+        el.style.width = w + 'px'; el.style.height = h + 'px';
+        const pg = { n, el, scale: sc, w, h, canvas: null, state: 'empty', stale: false, near: false, task: null };
+        el._pg = pg;
+        return pg;
+      });
+      pagesEl.replaceChildren(...pages.map((p) => p.el));
+      window.scrollTo(0, keep * document.body.scrollHeight);
+      pages.forEach((p) => observer.observe(p.el));
+    }
+    zoomEl.textContent = Math.round(pages[0].scale * 100) + '%';
     infoEl.textContent = doc.numPages + ' page' + (doc.numPages === 1 ? '' : 's');
-    const first = pagesEl.querySelector('canvas');
-    vscode.postMessage({ type: 'rendered', pages: doc.numPages, width: first ? first.width : 0, height: first ? first.height : 0 });
-    if (pending) { highlight(pending); pending = null; } else window.scrollTo(0, keep * document.body.scrollHeight);
+    if (pending) { const r = pending; pending = null; highlight(r); }
   }
 
   function highlight(r) {
-    const wrap = pagesEl.querySelector('.page[data-page="' + r.page + '"]');
-    if (!wrap) { pending = r; return; }
-    const s = parseFloat(wrap.dataset.scale);
+    const pg = pages[r.page - 1];
+    if (!pg) { pending = r; return; }
+    const s = pg.scale;
     const box = document.createElement('div');
     box.className = 'hl';
     box.style.left = r.h * s + 'px';
     box.style.top = (r.v - r.H) * s + 'px';
     box.style.width = Math.max(r.W, 6) * s + 'px';
     box.style.height = Math.max(r.H, 6) * s + 'px';
-    wrap.appendChild(box);
-    const top = wrap.getBoundingClientRect().top + window.scrollY + (r.v - r.H) * s;
+    pg.el.appendChild(box);
+    const top = pg.el.getBoundingClientRect().top + window.scrollY + (r.v - r.H) * s;
     window.scrollTo({ top: Math.max(0, top - window.innerHeight / 3), behavior: 'smooth' });
     setTimeout(() => box.remove(), 2500);
   }
@@ -82,16 +148,16 @@
     fitWidth = false;
     scale = Math.min(4, Math.max(0.4, s));
     vscode.setState({ scale });
-    render();
+    layout();
   }
-  document.getElementById('in').onclick = () => setScale(scale * 1.15);
-  document.getElementById('out').onclick = () => setScale(scale / 1.15);
-  document.getElementById('fit').onclick = () => { fitWidth = true; render(); };
-  window.addEventListener('resize', () => { if (fitWidth) render(); });
+  document.getElementById('in').onclick = () => setScale((fitWidth && pages[0] ? pages[0].scale : scale) * 1.15);
+  document.getElementById('out').onclick = () => setScale((fitWidth && pages[0] ? pages[0].scale : scale) / 1.15);
+  document.getElementById('fit').onclick = () => { fitWidth = true; layout(); };
+  let resizeTimer;
+  window.addEventListener('resize', () => { if (fitWidth) { clearTimeout(resizeTimer); resizeTimer = setTimeout(layout, 150); } });
 
   // ---- Issues list (errors / warnings / typesetting notes) ----
   const issuesEl = document.getElementById('issues');
-  const bannerEl = document.getElementById('banner');
   const issuesBtn = document.getElementById('issuesBtn');
   let issuesOpen = null;   // null = automatic: open when there are errors
 
@@ -102,14 +168,19 @@
     return n;
   };
 
+  function showBanner(text, kind) {
+    bannerEl.style.display = text ? 'block' : 'none';
+    bannerEl.textContent = text || '';
+    bannerEl.dataset.kind = kind || '';
+  }
+
   function showIssues(m) {
     const list = m.issues || [];
     const n = (s) => list.filter((i) => i.severity === s).length;
     const errors = n('error'), warnings = n('warning'), notes = n('info');
     issuesBtn.textContent = 'Issues: ' + errors + ' ✗  ' + warnings + ' ⚠' + (notes ? '  ' + notes + ' ℹ' : '');
     issuesBtn.className = errors ? 'bad' : warnings ? 'warn' : '';
-    bannerEl.style.display = m.stale ? 'block' : 'none';
-    bannerEl.textContent = m.stale ? 'Build failed — showing the last successful PDF. Fix the errors below and save again.' : '';
+    showBanner(m.stale ? 'Build failed — showing the last successful PDF. Fix the errors below and save again.' : '', 'failed');
     issuesEl.replaceChildren();
     if (!list.length) issuesEl.appendChild(el('div', null, 'No errors or warnings.')).id = 'none';
     const order = { error: 0, warning: 1, info: 2 };
@@ -137,14 +208,22 @@
     const m = e.data;
     if (m.type === 'highlight') { highlight(m.rect); return; }
     if (m.type === 'issues') { showIssues(m); return; }
+    if (m.type === 'status') { showBanner(m.text, 'busy'); return; }
+    if (m.type === 'ping') { vscode.postMessage({ type: 'pong', t: m.t, back: Date.now() }); return; }
     if (m.type !== 'pdf') return;
+    t0 = performance.now();
     try {
       const bin = atob(m.data);
       const bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
       await workerReady;
-      doc = await pdfjsLib.getDocument({ data: bytes }).promise;
-      await render();
+      const next = await pdfjsLib.getDocument({ data: bytes }).promise;
+      const old = doc;
+      doc = next;
+      reported = false;
+      sizes = [];
+      await layout();
+      if (old) old.destroy();
     } catch (err) { show('Could not render PDF: ' + (err && err.message || err)); }
   });
 
