@@ -212,7 +212,8 @@
   },
   "scripts": {
     "test": "node --test test/parse.test.js",
-    "package": "vsce package"
+    "package": "vsce package",
+    "test:vscode": "node test/integration/runTest.js"
   },
   "dependencies": {
     "pdfjs-dist": "3.11.174"
@@ -220,5 +221,8 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/shohelex/latex-sidekick.git"
+  },
+  "devDependencies": {
+    "@vscode/test-electron": "^3.1.0"
   }
 }

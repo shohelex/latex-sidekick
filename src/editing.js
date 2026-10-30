@@ -33,7 +33,8 @@ function register(context) {
           for (let j = i + 1; j < secs.length; j++) if (secs[j].level <= s.level) return secs[j].line - 1;
           return doc.lineCount - 1;
         })();
-        const range = new vscode.Range(s.line, 0, Math.max(s.line, endLine), 0);
+        const last = Math.max(s.line, endLine);
+        const range = new vscode.Range(s.line, 0, last, doc.lineAt(last).range.end.character);
         const sym = new vscode.DocumentSymbol(s.title || '(untitled)', s.kind, vscode.SymbolKind.String, range, doc.lineAt(s.line).range);
         while (stack.length && stack[stack.length - 1].level >= s.level) stack.pop();
         (stack.length ? stack[stack.length - 1].sym.children : roots).push(sym);

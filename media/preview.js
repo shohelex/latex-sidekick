@@ -48,6 +48,8 @@
     }
     pagesEl.replaceChildren(frag);
     infoEl.textContent = doc.numPages + ' page' + (doc.numPages === 1 ? '' : 's');
+    const first = pagesEl.querySelector('canvas');
+    vscode.postMessage({ type: 'rendered', pages: doc.numPages, width: first ? first.width : 0, height: first ? first.height : 0 });
     if (pending) { highlight(pending); pending = null; } else window.scrollTo(0, keep * document.body.scrollHeight);
   }
 

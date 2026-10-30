@@ -13,6 +13,7 @@ let lastMain;
 const { runTool, cfg } = require('./exec');
 const { parseLog, diagnoseSetup } = require('./parse');
 let lastIssues;
+const previewState = { rendered: null, errors: [] };   // what the preview panel reported back (used by the integration test)
 const synctex = require('./synctex');
 
 function resolveMain(doc) {
@@ -142,7 +143,8 @@ function openPreview(context) {
   w.html = html;
   w.onDidReceiveMessage((msg) => {
     if (msg.type === 'ready') { sendPdf(); sendIssues(); }
-    if (msg.type === 'error') output.appendLine('[preview] ' + msg.message);
+    if (msg.type === 'error') { previewState.errors.push(msg.message); output.appendLine('[preview] ' + msg.message); }
+    if (msg.type === 'rendered') previewState.rendered = { pages: msg.pages, width: msg.width, height: msg.height };
     if (msg.type === 'goto') {
       vscode.workspace.openTextDocument(msg.path).then((d) => {
         const pos = new vscode.Position(Math.max(0, (msg.line || 1) - 1), 0);
@@ -168,6 +170,7 @@ function activate(context) {
   context.subscriptions.push(output, diagnostics, status,
     vscode.commands.registerCommand('latexEditor.compile', () => compile()),
     vscode.commands.registerCommand('latexEditor.showLog', () => output.show(true)),
+    vscode.commands.registerCommand('latexEditor._state', () => ({ previewState, lastIssues, lastPdf, lastMain, panelOpen: !!panel })),
     vscode.commands.registerCommand('latexEditor.openPreview', () => {
       openPreview(context);
       const ed = vscode.window.activeTextEditor;

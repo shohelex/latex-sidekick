@@ -125,7 +125,8 @@ Nothing leaves your machine except two things, and only when you ask:
 ## Development
 
 ```
-npm test      # unit tests for the parsers
+npm test             # unit tests for the parsers (fast)
+npm run test:vscode  # opens a real VS Code in a temporary profile: builds a paper, renders the preview, checks errors and outline
 ```
 
 ## License
