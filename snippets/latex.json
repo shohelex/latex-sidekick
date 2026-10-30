@@ -1,0 +1,13 @@
+{
+  "Figure": { "prefix": "fig", "body": ["\\begin{figure}[t]", "\t\\centering", "\t\\includegraphics[width=\\linewidth]{${1:file}}", "\t\\caption{${2}}", "\t\\label{fig:${3}}", "\\end{figure}"] },
+  "Table": { "prefix": "tab", "body": ["\\begin{table}[t]", "\t\\centering", "\t\\caption{${1}}", "\t\\label{tab:${2}}", "\t\\begin{tabular}{${3:lcc}}", "\t\t\\hline", "\t\t${4}", "\t\t\\hline", "\t\\end{tabular}", "\\end{table}"] },
+  "Equation": { "prefix": "eq", "body": ["\\begin{equation}", "\t${1}", "\t\\label{eq:${2}}", "\\end{equation}"] },
+  "Align": { "prefix": "ali", "body": ["\\begin{align}", "\t${1}", "\\end{align}"] },
+  "Itemize": { "prefix": "itm", "body": ["\\begin{itemize}", "\t\\item ${1}", "\\end{itemize}"] },
+  "Enumerate": { "prefix": "enu", "body": ["\\begin{enumerate}", "\t\\item ${1}", "\\end{enumerate}"] },
+  "Section": { "prefix": "sec", "body": ["\\section{${1}}", "\\label{sec:${2}}", "$0"] },
+  "Subsection": { "prefix": "ssec", "body": ["\\subsection{${1}}", "\\label{sec:${2}}", "$0"] },
+  "Fraction": { "prefix": "frac", "body": "\\frac{${1}}{${2}}" },
+  "Cite": { "prefix": "cit", "body": "\\cite{${1}}" },
+  "Reference": { "prefix": "rf", "body": "\\ref{${1}}" }
+}

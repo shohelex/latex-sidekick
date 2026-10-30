@@ -1,0 +1,198 @@
+{
+  "name": "latex-sidekick",
+  "displayName": "LaTeX Sidekick",
+  "description": "Overleaf/Prism-style LaTeX writing in VS Code: build on save (WSL or native), live side-by-side PDF with click-to-jump, citations, outline, and an optional Claude writing assistant.",
+  "version": "0.2.0",
+  "publisher": "local",
+  "license": "Apache-2.0",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:latex",
+    "onLanguage:tex",
+    "workspaceContains:**/*.tex"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "latexEditor.compile",
+        "title": "LaTeX Editor: Build",
+        "icon": "$(play)"
+      },
+      {
+        "command": "latexEditor.openPreview",
+        "title": "LaTeX Editor: Open Side-by-Side Preview",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "latexEditor.syncToPdf",
+        "title": "LaTeX Editor: Show This Line in the PDF"
+      },
+      {
+        "command": "latexEditor.clean",
+        "title": "LaTeX Editor: Clean Build Files"
+      },
+      {
+        "command": "latexEditor.insertCitation",
+        "title": "LaTeX Editor: Insert Citation"
+      },
+      {
+        "command": "latexEditor.addByDoi",
+        "title": "LaTeX Editor: Add Reference by DOI"
+      },
+      {
+        "command": "latexEditor.insert",
+        "title": "LaTeX Editor: Insert Symbol / Environment…"
+      },
+      {
+        "command": "latexEditor.ai.edit",
+        "title": "LaTeX Editor: Ask Claude to Edit Selection"
+      },
+      {
+        "command": "latexEditor.ai.setApiKey",
+        "title": "LaTeX Editor: Set Anthropic API Key"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "latexEditor.openPreview",
+          "when": "resourceExtname == .tex",
+          "group": "navigation"
+        },
+        {
+          "command": "latexEditor.compile",
+          "when": "resourceExtname == .tex",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "latexEditor.ai.edit",
+          "when": "resourceExtname == .tex",
+          "group": "9_latexEditor@1"
+        },
+        {
+          "command": "latexEditor.insertCitation",
+          "when": "resourceExtname == .tex",
+          "group": "9_latexEditor@2"
+        },
+        {
+          "command": "latexEditor.syncToPdf",
+          "when": "resourceExtname == .tex",
+          "group": "9_latexEditor@3"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "latexEditor.compile",
+        "key": "ctrl+alt+b",
+        "when": "resourceExtname == .tex"
+      },
+      {
+        "command": "latexEditor.openPreview",
+        "key": "ctrl+alt+v",
+        "when": "resourceExtname == .tex"
+      },
+      {
+        "command": "latexEditor.syncToPdf",
+        "key": "ctrl+alt+j",
+        "when": "resourceExtname == .tex"
+      },
+      {
+        "command": "latexEditor.insertCitation",
+        "key": "ctrl+alt+c",
+        "when": "resourceExtname == .tex"
+      },
+      {
+        "command": "latexEditor.ai.edit",
+        "key": "ctrl+alt+i",
+        "when": "resourceExtname == .tex"
+      },
+      {
+        "command": "latexEditor.wrap",
+        "args": "textbf",
+        "key": "ctrl+b",
+        "when": "resourceExtname == .tex && editorTextFocus"
+      },
+      {
+        "command": "latexEditor.wrap",
+        "args": "textit",
+        "key": "ctrl+i",
+        "when": "resourceExtname == .tex && editorTextFocus"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "latex",
+        "path": "./snippets/latex.json"
+      }
+    ],
+    "configuration": {
+      "title": "LaTeX Editor",
+      "properties": {
+        "latexEditor.useWSL": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run latexmk and synctex inside WSL (Windows only)."
+        },
+        "latexEditor.wslDistro": {
+          "type": "string",
+          "default": "",
+          "description": "WSL distro name; empty uses the default."
+        },
+        "latexEditor.compileOnSave": {
+          "type": "boolean",
+          "default": true
+        },
+        "latexEditor.autoOpenPreview": {
+          "type": "boolean",
+          "default": true,
+          "description": "Open the side-by-side preview automatically when a .tex file is saved."
+        },
+        "latexEditor.mainFile": {
+          "type": "string",
+          "default": "",
+          "description": "Root .tex file (relative to the workspace). Empty: the edited file, or the root named by a '%!TEX root = main.tex' comment."
+        },
+        "latexEditor.engine": {
+          "type": "string",
+          "enum": [
+            "pdflatex",
+            "xelatex",
+            "lualatex"
+          ],
+          "default": "pdflatex"
+        },
+        "latexEditor.outDir": {
+          "type": "string",
+          "default": ".latex-build",
+          "description": "Build output directory (relative to the main file)."
+        },
+        "latexEditor.ai.model": {
+          "type": "string",
+          "default": "claude-sonnet-5-5",
+          "description": "Claude model used by the writing assistant. Only the text you select is sent, and only when you run the command."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test test/parse.test.js",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "pdfjs-dist": "3.11.174"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shohelex/latex-sidekick.git"
+  }
+}

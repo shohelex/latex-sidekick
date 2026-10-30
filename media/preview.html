@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src {{csp}} data:; script-src {{csp}}; style-src 'unsafe-inline'; worker-src {{csp}} blob:; connect-src {{csp}} blob: data:;">
+<style>
+  body { margin: 0; background: var(--vscode-editor-background); }
+  #bar { position: sticky; top: 0; z-index: 2; display: flex; gap: 6px; align-items: center; padding: 4px 8px;
+         background: var(--vscode-editorWidget-background); color: var(--vscode-foreground); font: 12px sans-serif; }
+  #bar button { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground);
+                border: 0; padding: 2px 8px; cursor: pointer; }
+  #pages { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px; }
+  .page { position: relative; }
+  .hl { position: absolute; background: rgba(255,214,0,.45); outline: 2px solid rgba(255,170,0,.9); pointer-events: none; }
+  canvas { display: block; box-shadow: 0 1px 4px rgba(0,0,0,.5); background: #fff; }
+  #empty { color: var(--vscode-descriptionForeground); font: 13px sans-serif; padding: 16px; }
+</style>
+</head>
+<body data-worker="{{worker}}">
+  <div id="bar">
+    <button id="out">−</button><span id="zoom">100%</span><button id="in">+</button>
+    <button id="fit">Fit width</button><span id="info"></span>
+  </div>
+  <div id="pages"><div id="empty">Save a .tex file (Ctrl+S) to build and see the PDF here. Double-click the PDF to jump to the source.</div></div>
+  <script src="{{pdfjs}}"></script>
+  <script src="{{script}}"></script>
+</body>
+</html>

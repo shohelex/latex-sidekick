@@ -1,0 +1,8 @@
+node_modules/
+.latex-build/
+*.vsix
+*.aux
+*.log
+*.fls
+*.fdb_latexmk
+*.synctex.gz
