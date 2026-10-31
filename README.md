@@ -52,7 +52,7 @@ git clone https://github.com/shohelex/latex-sidekick.git
 cd latex-sidekick
 npm install
 npx @vscode/vsce package
-code --install-extension latex-sidekick-0.3.4.vsix
+code --install-extension latex-sidekick-0.3.5.vsix
 ```
 
 Then reload VS Code. In VS Code you can also use Extensions â†’ `â€¦` â†’ **Install from VSIXâ€¦** and pick the `.vsix` file.
@@ -97,6 +97,14 @@ Each problem has a lightbulb (`Ctrl+.`) on its squiggle, and a **Fix with AI** b
 What is recognised: LaTeX errors (undefined commands and environments, missing `$`, unbalanced braces, mismatched `\begin`/`\end`, missing files and images, Unicode characters, table and math mistakes, option clashes, and about 40 more), package and class errors (shown on *your* line, not inside the `.sty`), warnings (undefined references and citations, duplicate labels, missing characters, font substitutions, pdfTeX warnings), BibTeX and Biber problems (missing entries, syntax errors in the `.bib`, shown on the `.bib` line), overfull/underfull boxes, and setup problems (WSL, `latexmk`, `bibtex`/`biber` missing, main file not found, timeouts, no write permission).
 
 When a build fails, the preview keeps showing the last good PDF with a "Build failed" banner instead of going blank. Setup problems (WSL not installed, `latexmk` not found, a build that runs past `latexEditor.buildTimeoutSeconds`) get their own message with the fix and an **Open settings** button.
+
+## When something goes wrong
+
+Errors never leave the extension stuck or change your files behind your back:
+
+- A build that fails inside the extension, or runs away (an infinite loop printing gigabytes), is stopped and reported; the next save builds normally. Logs and problem lists are size-capped.
+- If the AI service fails (bad key, no internet, out of credit, timeout after 90 s, nonsense reply), your file is untouched and the message offers the free Claude.ai route.
+- A fix is only applied after you approve the diff; a fix that deletes most of the text needs a second confirmation, and text that is not a plausible fix is refused. After applying, **Undo** is one click (or Ctrl+Z).
 
 ## Troubleshooting
 

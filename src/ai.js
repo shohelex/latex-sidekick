@@ -25,7 +25,36 @@ const PRESETS = [
 // setting, so a project you open cannot redirect your API key.
 const ENDPOINT = () => process.env.LATEX_SIDEKICK_API_URL || 'https://api.anthropic.com/v1/messages';
 
-async function callClaude(apiKey, system, user, signal) {
+const API_TIMEOUT_MS = 90 * 1000;
+
+/** Turn a failed API call into one plain sentence. */
+function explainApiError(e) {
+  const m = /^Anthropic API (\d+)/.exec(e.message || '');
+  const status = m ? Number(m[1]) : 0;
+  if (e.timedOut) return 'Claude did not answer within 90 seconds.';
+  if (status === 401 || status === 403) return 'The API key was rejected. Check it with "LaTeX Editor: Set Anthropic API Key".';
+  if (status === 429) return 'Too many requests, or the account is out of credit. Try again later.';
+  if (status >= 500) return 'The Anthropic service is having trouble. Try again in a minute.';
+  if (status) return e.message;
+  return 'Could not reach the Anthropic API (' + (e.cause && e.cause.code || e.message) + '). Check your internet connection.';
+}
+
+async function callClaude(apiKey, system, user, outer) {
+  // A call must never hang forever: abort on the user's cancel or after the timeout.
+  const ac = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; ac.abort(); }, API_TIMEOUT_MS);
+  if (outer) outer.addEventListener('abort', () => ac.abort());
+  const signal = ac.signal;
+  try {
+    return await callOnce(apiKey, system, user, signal);
+  } catch (e) {
+    if (timedOut) { const t = new Error('timeout'); t.timedOut = true; throw t; }
+    throw e;
+  } finally { clearTimeout(timer); }
+}
+
+async function callOnce(apiKey, system, user, signal) {
   const res = await fetch(ENDPOINT(), {
     method: 'POST',
     signal,
@@ -72,6 +101,7 @@ async function finishFix(ctx, reply, opts = {}) {
     vscode.window.showInformationMessage(`Claude: ${parsed.explanation || 'no change suggested.'}${extra}`);
     return { applied: false, explanation: parsed.explanation };
   }
+  if (chk.warn && opts.apply) return { applied: false, rejected: chk.warn };   // no unattended application of a suspicious change
   if (!opts.apply) {
     const id = String(Date.now());
     proposals.set(id, fix.applyEdits(lines, plan.edits).join(eol));
@@ -94,8 +124,18 @@ async function finishFix(ctx, reply, opts = {}) {
     if (e.start === e.end) we.insert(doc.uri, r.start, e.start >= doc.lineCount ? eol + body : body + eol);
     else we.replace(doc.uri, r, e.end < doc.lineCount ? body + eol : body);
   }
-  await vscode.workspace.applyEdit(we);
-  vscode.window.setStatusBarMessage('$(check) Claude fix applied (Ctrl+Z to undo). Save to rebuild.', 6000);
+  if (!(await vscode.workspace.applyEdit(we))) {
+    vscode.window.showWarningMessage('The fix could not be applied (is the file read-only?). Nothing was changed.');
+    return { applied: false, explanation: parsed.explanation };
+  }
+  // A visible way back, in addition to Ctrl+Z.
+  if (!opts.apply) {
+    vscode.window.showInformationMessage('Claude\'s fix was applied. Save to rebuild.', 'Undo').then(async (c) => {
+      if (!c) return;
+      await vscode.window.showTextDocument(doc);
+      await vscode.commands.executeCommand('undo');
+    });
+  }
   return { applied: true, explanation: parsed.explanation };
 }
 
@@ -134,7 +174,12 @@ function watchForAnswer(promptText, opts) {
           const t = await vscode.env.clipboard.readText();
           if (t === last) return;
           last = t;
-          if (fix.extractReply(t) !== undefined && !t.includes('<fragment>')) { done(); applyClipboardFix({ apply: opts.apply, watcher: true }); }
+          if (fix.extractReply(t) !== undefined && !t.includes('<fragment>')) {
+            done();
+            applyClipboardFix({ apply: opts.apply, watcher: true }).catch((e) => vscode.window.showErrorMessage('Could not use the answer: ' + ((e && e.message) || e) + '. Your file was not changed.'));
+          }
+        } catch (e) {
+          console.error('[latex-sidekick] clipboard watcher', e);   // e.g. clipboard busy: try again on the next tick
         } finally { busy = false; }
       }, 1500);
       stopWatching = done;
@@ -189,8 +234,14 @@ async function fixIssue(context, issue, opts = {}) {
         return callClaude(key, ctx.prompt.system, ctx.prompt.user, ac.signal);
       });
   } catch (e) {
-    if (e.name !== 'AbortError') vscode.window.showErrorMessage(`AI fix failed: ${e.message}`);
-    return { error: e.message };
+    if (e.name === 'AbortError' && !e.timedOut) return { cancelled: true };
+    const why = explainApiError(e);
+    // No dead end: offer the key-free route right away. Nothing in the file has been touched.
+    vscode.window.showErrorMessage(`AI fix failed: ${why} Your file was not changed.`, 'Use free Claude.ai account instead', 'Set API key').then((c) => {
+      if (c === 'Use free Claude.ai account instead') vscode.commands.executeCommand('latexEditor.ai.fixInChat', issue);
+      else if (c === 'Set API key') vscode.commands.executeCommand('latexEditor.ai.setApiKey');
+    });
+    return { error: why };
   }
   return finishFix(ctx, reply, opts);
 }
@@ -215,6 +266,14 @@ async function applyClipboardFix(opts = {}) {
   return out;
 }
 
+/** No command handler may throw into VS Code: report it, leave the files alone. */
+const guard = (name, fn) => async (...args) => {
+  try { return await fn(...args); } catch (e) {
+    console.error('[latex-sidekick] ' + name, e);
+    vscode.window.showErrorMessage(`${name} failed: ${(e && e.message) || e}. Your files were not changed by this error.`);
+  }
+};
+
 function register(context, host = {}) {
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider(SCHEME, { provideTextDocumentContent: (uri) => proposals.get(uri.query) || '' }),
@@ -225,10 +284,10 @@ function register(context, host = {}) {
       });
       if (key) { await context.secrets.store(KEY, key.trim()); vscode.window.showInformationMessage('API key saved.'); }
     }),
-    vscode.commands.registerCommand('latexEditor.ai.fixIssue', (issue, opts) => fixIssue(context, issue, opts)),
-    vscode.commands.registerCommand('latexEditor.ai.fixInChat', (issue, opts) => fixIssue(context, issue || firstProblem(host), { ...opts, mode: 'chat' })),
-    vscode.commands.registerCommand('latexEditor.ai.applyClipboardFix', (opts) => applyClipboardFix(opts)),
-    vscode.commands.registerCommand('latexEditor.ai.fixFirstError', () => fixIssue(context, firstProblem(host))),
+    vscode.commands.registerCommand('latexEditor.ai.fixIssue', guard('Fix with AI', (issue, opts) => fixIssue(context, issue, opts))),
+    vscode.commands.registerCommand('latexEditor.ai.fixInChat', guard('Fix with Claude.ai', (issue, opts) => fixIssue(context, issue || firstProblem(host), { ...opts, mode: 'chat' }))),
+    vscode.commands.registerCommand('latexEditor.ai.applyClipboardFix', guard('Apply Claude\'s answer', (opts) => applyClipboardFix(opts))),
+    vscode.commands.registerCommand('latexEditor.ai.fixFirstError', guard('Fix with AI', () => fixIssue(context, firstProblem(host)))),
     vscode.commands.registerCommand('latexEditor.ai.edit', async () => {
       const ed = vscode.window.activeTextEditor;
       if (!ed) return;
@@ -265,7 +324,7 @@ function register(context, host = {}) {
         await ed.edit((eb) => eb.replace(range, result));   // one undo step restores the original
         vscode.window.setStatusBarMessage('$(check) Claude edit applied (Ctrl+Z to undo)', 5000);
       } catch (e) {
-        if (e.name !== 'AbortError') vscode.window.showErrorMessage(`AI edit failed: ${e.message}`);
+        if (e.name !== 'AbortError' || e.timedOut) vscode.window.showErrorMessage(`AI edit failed: ${explainApiError(e)} Your text was not changed.`);
       }
     }));
 }

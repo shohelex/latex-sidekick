@@ -8,6 +8,10 @@ const { packageFor, planPackage, closest } = require('./issues');
 function register(context, host) {
   const provider = {
     async provideCodeActions(doc, _range, ctx) {
+      try { return await actionsFor(doc, ctx); } catch (e) { console.error('[latex-sidekick] quick fixes', e); return []; }   // a lightbulb must never break the editor
+    },
+  };
+  async function actionsFor(doc, ctx) {
       const actions = [];
       for (const d of ctx.diagnostics) {
         if (d.source !== 'latex') continue;
@@ -52,8 +56,7 @@ function register(context, host) {
         actions.push(log);
       }
       return actions;
-    },
-  };
+  }
   context.subscriptions.push(vscode.languages.registerCodeActionsProvider(
     [{ language: 'latex' }, { language: 'tex' }, { language: 'bibtex' }, { pattern: '**/*.{tex,bib}' }], provider,
     { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }));

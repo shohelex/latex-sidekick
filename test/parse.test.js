@@ -192,3 +192,21 @@ test('checkFix: refuses the prompt echoed back or prose without LaTeX, warns on 
   assert.ok(fix.checkFix('\\documentclass{article}\n\\begin{document}', 'a \\b\nc\nd\ne\nf\ng').warn);
   assert.deepStrictEqual(fix.checkFix('\\documentclass{article}\n\\begin{document}\nHello world.\n\\end{document}', frag), {});
 });
+
+test('parsers survive garbage and huge input quickly (no throw, no catastrophic backtracking)', () => {
+  const rnd = (n) => Array.from({ length: n }, () => String.fromCharCode(Math.floor(Math.random() * 120) + 1)).join('');
+  const inputs = [
+    '', '\0\0\0', rnd(5000), '!'.repeat(10000), 'l.'.repeat(5000), 'LaTeX Warning: ' + 'x'.repeat(300000),
+    './main.tex:' + '1'.repeat(100000), '! ' + ' '.repeat(200000), 'Reference `' + 'a'.repeat(200000) + "' on page 1 undefined",
+    ('Overfull \\hbox (1pt too wide) in paragraph at lines 1--2\n').repeat(50000),
+    "LaTeX Warning: Citation `k' on page 1 undefined on input line 3.\n".repeat(50000),
+    ('x'.repeat(79) + '\n').repeat(20000) + '! Undefined control sequence.\nl.5 \\foo',
+    'Warning--I didn\'t find a database entry for "' + 'k'.repeat(200000) + '"', '---line 1 of file ' + 'x'.repeat(200000),
+  ];
+  for (const input of inputs) {
+    const t0 = Date.now();
+    assert.doesNotThrow(() => { p.parseLog(input); p.parseBlg(input); p.diagnoseSetup(input); p.hintFor(input); });
+    assert.ok(Date.now() - t0 < 3000, `too slow (${Date.now() - t0} ms) on input starting ${JSON.stringify(input.slice(0, 30))}`);
+  }
+  assert.doesNotThrow(() => { fix.parseFixReply(rnd(5000)); fix.extractReply(rnd(5000)); fix.checkFix(rnd(2000), rnd(2000)); fix.chatUrl(rnd(9000)); });
+});

@@ -5,6 +5,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+// Windows may still hold a handle on a build folder for a moment; cleanup must never fail a test.
+const rm = (d) => { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* temp folder, harmless */ } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(fn, ms, what) {
   const end = Date.now() + ms;
@@ -78,7 +80,7 @@ test('a broken document reports an error on the right line, with a hint', async 
   const diags = vscode.languages.getDiagnostics(vscode.Uri.file(file));
   assert.ok(diags.some((d) => d.severity === vscode.DiagnosticSeverity.Error && d.range.start.line === 2), 'no squiggle on line 3');
   assert.ok(diags.some((d) => d.severity === vscode.DiagnosticSeverity.Warning), 'undefined reference not reported as a warning');
-  fs.rmSync(dir, { recursive: true, force: true });
+  rm(dir);
 });
 
 test('outline lists sections', async () => {
@@ -89,7 +91,7 @@ test('outline lists sections', async () => {
   const syms = await vscode.commands.executeCommand('vscode.executeDocumentSymbolProvider', doc.uri);
   assert.deepStrictEqual(syms.map((x) => x.name), ['One', 'Three']);
   assert.deepStrictEqual(syms[0].children.map((x) => x.name), ['Two']);
-  fs.rmSync(dir, { recursive: true, force: true });
+  rm(dir);
 });
 
 
@@ -143,7 +145,7 @@ test('a 60-page paper renders without freezing the viewer', async () => {
   const p = await until(async () => (await state()).previewState.pong, 5000, 'preview to answer a ping');
   console.log('         ping answered in ' + (Date.now() - t0) + ' ms');
   assert.ok(s.previewState.rendered.pages >= 60);
-  fs.rmSync(dir, { recursive: true, force: true });
+  rm(dir);
 });
 
 function tempDoc(body, extra = '') {
@@ -170,7 +172,7 @@ test('lightbulb offers "Add \\usepackage" for a command whose package is missing
   await build();
   const s = await state();
   assert.strictEqual(s.lastIssues.issues.filter((i) => i.severity === 'error').length, 0, JSON.stringify(s.lastIssues.issues));
-  fs.rmSync(dir, { recursive: true, force: true });
+  rm(dir);
 });
 
 test('lightbulb suggests the nearest label for a misspelled \\ref', async () => {
@@ -182,7 +184,7 @@ test('lightbulb suggests the nearest label for a misspelled \\ref', async () => 
   assert.ok(diags.length, 'undefined reference not reported');
   const actions = await vscode.commands.executeCommand('vscode.executeCodeActionProvider', doc.uri, diags[0].range);
   assert.ok(actions.some((a) => a.title === 'Change "sec:resutls" to "sec:results"'), actions.map((a) => a.title).join(' | '));
-  fs.rmSync(dir, { recursive: true, force: true });
+  rm(dir);
 });
 
 test('Fix with AI sends the message and nearby source, and applies the fix (mock API)', async () => {
@@ -217,7 +219,7 @@ test('Fix with AI sends the message and nearby source, and applies the fix (mock
     await doc.save();
     await build();
     assert.strictEqual((await state()).lastIssues.issues.filter((i) => i.severity === 'error').length, 0);
-    fs.rmSync(dir, { recursive: true, force: true });
+    rm(dir);
   } finally {
     delete process.env.LATEX_SIDEKICK_API_URL;
     delete process.env.LATEX_SIDEKICK_API_KEY;
@@ -242,7 +244,7 @@ test('Fix with a free Claude.ai account: prompt is copied, the pasted answer is 
   const done = await vscode.commands.executeCommand('latexEditor.ai.applyClipboardFix', { apply: true });
   assert.ok(done && done.applied, 'answer not applied: ' + JSON.stringify(done));
   assert.ok(!doc.getText().includes('\\foo'), 'text not fixed: ' + doc.getText());
-  fs.rmSync(dir, { recursive: true, force: true });
+  rm(dir);
 });
 test('free-account flow: the answer is noticed on the clipboard without any extra click', async () => {
   delete process.env.LATEX_SIDEKICK_API_KEY;
@@ -259,7 +261,7 @@ test('free-account flow: the answer is noticed on the clipboard without any extr
   assert.ok(doc.getText().includes('\\foo'), 'must not change anything for unrelated clipboard text');
   await vscode.env.clipboard.writeText('```\n<explanation>Removed it.</explanation>\n<fix>\n\\documentclass{article}\n\\begin{document}\nHello world.\n\\end{document}\n</fix>\n```');
   await until(() => !doc.getText().includes('\\foo'), 15000, 'the answer on the clipboard to be applied automatically');
-  fs.rmSync(dir, { recursive: true, force: true });
+  rm(dir);
 });
 
 test('the PDF preview follows the width of its pane when the window layout changes', async () => {
@@ -286,7 +288,7 @@ test('free-account flow: a plain code block (no tags) copied by hand is still of
   const done = await vscode.commands.executeCommand('latexEditor.ai.applyClipboardFix', { apply: true });
   assert.ok(done && done.applied, JSON.stringify(done));
   assert.strictEqual(doc.getText().trim(), '\\documentclass{article}\n\\begin{document}\nHello world.\n\\end{document}');
-  fs.rmSync(dir, { recursive: true, force: true });
+  rm(dir);
 });
 test('free-account flow: text that is not a fix (a piece of the prompt, or plain prose) never changes the file', async () => {
   delete process.env.LATEX_SIDEKICK_API_KEY;
@@ -304,7 +306,93 @@ test('free-account flow: text that is not a fix (a piece of the prompt, or plain
     assert.ok(!r || !r.applied, 'junk was applied: ' + junk.slice(0, 40));
     assert.strictEqual(doc.getText(), before, 'file changed by junk: ' + junk.slice(0, 40));
   }
-  fs.rmSync(dir, { recursive: true, force: true });
+  rm(dir);
+});
+async function buildsAgainOk() {
+  const { dir, file } = tempDoc('All good here.');
+  const doc = await vscode.workspace.openTextDocument(file);
+  await vscode.window.showTextDocument(doc);
+  await build();
+  const s = await state();
+  assert.strictEqual(s.busy, false, 'extension is stuck busy');
+  assert.strictEqual(s.lastIssues.issues.filter((i) => i.severity === 'error').length, 0, 'a good document no longer builds: ' + JSON.stringify(s.lastIssues.issues));
+  rm(dir);
+}
+
+test('robustness: an internal failure during a build does not leave the extension stuck', async () => {
+  await vscode.commands.executeCommand('latexEditor._injectFailure');
+  const { dir, file } = tempDoc('Anything.');
+  const doc = await vscode.workspace.openTextDocument(file);
+  await vscode.window.showTextDocument(doc);
+  await build();                                    // this build throws internally
+  assert.strictEqual((await state()).busy, false, 'still busy after the failure');
+  rm(dir);
+  await buildsAgainOk();                            // and the next one works
+});
+
+test('robustness: a runaway build is stopped, and the next build works', async () => {
+  const conf = vscode.workspace.getConfiguration('latexEditor');
+  await conf.update('buildTimeoutSeconds', 10, vscode.ConfigurationTarget.Global);
+  try {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sidekick-loop-'));
+    const file = path.join(dir, 'main.tex');
+    fs.writeFileSync(file, '\\documentclass{article}\n\\begin{document}\n\\def\\x{\\message{looping looping looping looping}\\x}\\x\n\\end{document}\n');
+    const doc = await vscode.workspace.openTextDocument(file);
+    await vscode.window.showTextDocument(doc);
+    const t0 = Date.now();
+    await build();
+    assert.ok(Date.now() - t0 < 60000, 'the runaway build was not stopped in time');
+    assert.strictEqual((await state()).busy, false);
+    rm(dir);
+  } finally {
+    await conf.update('buildTimeoutSeconds', undefined, vscode.ConfigurationTarget.Global);
+  }
+  await buildsAgainOk();
+});
+
+test('robustness: whatever the AI service does, the file is untouched and the extension keeps working', async () => {
+  const http = require('http');
+  let mode = '500';
+  const server = http.createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      if (mode === 'hang-up') { req.socket.destroy(); return; }
+      const send = (code, body) => { res.statusCode = code; res.setHeader('content-type', 'application/json'); res.end(body); };
+      if (mode === '500') send(500, '{"error":{"message":"boom"}}');
+      else if (mode === '401') send(401, '{"error":{"message":"invalid x-api-key"}}');
+      else if (mode === '429') send(429, '{}');
+      else if (mode === 'html') send(200, '<html>not json</html>');
+      else if (mode === 'empty') send(200, JSON.stringify({ content: [] }));
+      else if (mode === 'prose') send(200, JSON.stringify({ content: [{ type: 'text', text: 'Sorry, I cannot help with that.' }] }));
+      else if (mode === 'echo') send(200, JSON.stringify({ content: [{ type: 'text', text: '<explanation>x</explanation><fix>Reply in exactly this format and nothing else:</fix>' }] }));
+      else if (mode === 'wipe') send(200, JSON.stringify({ content: [{ type: 'text', text: '<explanation>cleaned up</explanation><fix>\n\\documentclass{article}\n</fix>' }] }));
+    });
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const port = server.address().port;
+  process.env.LATEX_SIDEKICK_API_KEY = 'test-key';
+  const { dir, file } = tempDoc('Line one.\nHello \\foo world.\nLine three.\nLine four.\nLine five.');
+  try {
+    const doc = await vscode.workspace.openTextDocument(file);
+    await vscode.window.showTextDocument(doc);
+    await build();
+    const before = doc.getText();
+    const err = (await state()).lastIssues.issues.find((i) => i.severity === 'error');
+    for (const m of ['500', '401', '429', 'html', 'empty', 'prose', 'echo', 'wipe', 'hang-up', 'refused']) {
+      mode = m;
+      process.env.LATEX_SIDEKICK_API_URL = m === 'refused' ? 'http://127.0.0.1:1/v1/messages' : `http://127.0.0.1:${port}/v1/messages`;
+      let r;
+      await assert.doesNotReject(async () => { r = await vscode.commands.executeCommand('latexEditor.ai.fixIssue', err, { apply: true }); }, `fix threw in mode ${m}`);
+      assert.ok(!r || !r.applied, `a bad answer was applied in mode ${m}: ${JSON.stringify(r)}`);
+      assert.strictEqual(doc.getText(), before, `file changed in mode ${m}`);
+    }
+  } finally {
+    delete process.env.LATEX_SIDEKICK_API_URL;
+    delete process.env.LATEX_SIDEKICK_API_KEY;
+    server.close();
+    rm(dir);
+  }
+  await buildsAgainOk();
 });
 // Optional: point IEEE_PAPER_DIR at a folder holding an IEEE template paper (main.tex, IEEEtran.cls, .bib).
 const ieee = process.env.IEEE_PAPER_DIR;
@@ -319,7 +407,7 @@ if (ieee) test('an IEEEtran journal paper with BibTeX builds without errors', as
   console.log('         ' + s.lastIssues.issues.map((i) => i.severity + ': ' + i.message).join('\n         '));
   assert.strictEqual(errs.length, 0, JSON.stringify(errs));
   assert.ok(fs.existsSync(path.join(dir, '.latex-build', 'main.pdf')));
-  fs.rmSync(dir, { recursive: true, force: true });
+  rm(dir);
 });
 
 async function run() {

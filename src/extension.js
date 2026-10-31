@@ -39,13 +39,26 @@ const SEVERITY = {
 };
 
 /** Read the .log latexmk wrote (more complete than its console output); fall back to the console text. */
+/** Read at most `max` bytes from the start of a file (a runaway build can leave a log of hundreds of MB). */
+function readHead(file, max) {
+  const fd = fs.openSync(file, 'r');
+  try {
+    const buf = Buffer.alloc(Math.min(fs.fstatSync(fd).size, max));
+    fs.readSync(fd, buf, 0, buf.length, 0);
+    return buf.toString('utf8');
+  } finally { fs.closeSync(fd); }
+}
+
 function readIssues(main, consoleLog) {
   const dir = path.dirname(main);
   const stem = path.join(dir, cfg().get('outDir'), path.basename(main).replace(/\.tex$/i, ''));
   let text = consoleLog;
-  try { text = fs.readFileSync(stem + '.log', 'utf8'); } catch { /* use console output */ }
   let bib = '';
-  try { bib = fs.readFileSync(stem + '.blg', 'utf8'); } catch { /* no bibliography step */ }
+  // If the tool never started (no WSL, no latexmk), any .log on disk is a leftover from an earlier run: ignore it.
+  if (!diagnoseSetup(consoleLog)) {
+    try { text = readHead(stem + '.log', 8 * 1024 * 1024); } catch { /* use console output */ }
+    try { bib = readHead(stem + '.blg', 2 * 1024 * 1024); } catch { /* no bibliography step */ }
+  }
   const fromLog = parseLog(text);
   const citeKeys = new Set(fromLog.filter((i) => i.code === 'undefined-cite').map((i) => i.key));
   const fromBib = parseBlg(bib).filter((i) => !(i.code === 'undefined-cite' && citeKeys.has(i.key)));   // the .log already says it
@@ -115,6 +128,40 @@ async function compile(doc) {
   }
   if (running) { queued = doc; return; }
   running = true;
+  try {
+    await build(doc);
+  } catch (e) {
+    // Whatever went wrong, the next build must still be able to start.
+    const msg = (e && e.message) || String(e);
+    output.appendLine('[internal error] ' + ((e && e.stack) || msg));
+    setStatus('$(error) Build error', 'LaTeX Sidekick hit an internal error: ' + msg);
+    sendIssues();
+    vscode.window.showErrorMessage('LaTeX Sidekick hit an internal error while building: ' + msg, 'Show log').then((c) => { if (c) output.show(true); });
+  } finally {
+    running = false;
+    savingForBuild = false;
+    busyText = '';
+    if (queued) { const q = queued; queued = false; compile(q); }
+  }
+}
+
+/** Cap what is shown, so a runaway document with tens of thousands of warnings cannot flood the UI. */
+function capIssues(issues) {
+  const LIMIT = { error: 200, warning: 300, info: 200 };
+  const seen = { error: 0, warning: 0, info: 0 };
+  const kept = [];
+  const dropped = { error: 0, warning: 0, info: 0 };
+  for (const it of issues) {
+    if (++seen[it.severity] <= LIMIT[it.severity]) kept.push(it); else dropped[it.severity]++;
+  }
+  const more = dropped.error + dropped.warning + dropped.info;
+  if (more) kept.push({ severity: 'info', kind: 'typesetting', message: `${more} more problems are not shown (${dropped.error} errors, ${dropped.warning} warnings). Fix the first ones and build again.`, path: kept.length ? kept[0].path : '' });
+  return kept;
+}
+
+let injectFailure = false;   // test hook: make the next build throw, to prove a failure cannot leave the extension stuck
+async function build(doc) {
+  if (injectFailure) { injectFailure = false; throw new Error('injected failure'); }
   savingForBuild = true;   // saving here must not queue a second build through the on-save handler
   try { await vscode.workspace.saveAll(false); } finally { savingForBuild = false; }
   const main = resolveMain(doc);
@@ -127,7 +174,7 @@ async function compile(doc) {
     { location: vscode.ProgressLocation.Notification, title: 'LaTeX: building ' + path.basename(main) + '…' },
     () => runLatexmk(main));
   const secs = ((Date.now() - t0) / 1000).toFixed(1);
-  const issues = readIssues(main, log);
+  const issues = capIssues(readIssues(main, log));
   publishIssues(issues);
   const errors = countOf(issues, 'error');
   const warnings = countOf(issues, 'warning');
@@ -155,8 +202,6 @@ async function compile(doc) {
       else if (choice === 'Show problems') vscode.commands.executeCommand('workbench.actions.view.problems');
     });
   }
-  running = false;
-  if (queued) { const q = queued; queued = false; compile(q); }
 }
 
 let status;
@@ -242,6 +287,7 @@ function activate(context) {
     vscode.commands.registerCommand('latexEditor.showLog', () => output.show(true)),
     vscode.commands.registerCommand('latexEditor._state', () => ({ previewState, lastIssues, lastPdf, lastMain, panelOpen: !!panel, busy: running || !!queued })),
     // Test hooks (not listed in package.json): ping the preview to measure responsiveness.
+    vscode.commands.registerCommand('latexEditor._injectFailure', () => { injectFailure = true; }),
     vscode.commands.registerCommand('latexEditor._ping', () => { previewState.pong = null; if (panel) panel.webview.postMessage({ type: 'ping', t: Date.now() }); }),
     vscode.commands.registerCommand('latexEditor.openPreview', () => {
       openPreview(context);
