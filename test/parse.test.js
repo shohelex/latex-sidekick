@@ -182,3 +182,13 @@ test('chatUrl: the whole prompt survives in the ?q= parameter; huge prompts fall
   assert.strictEqual(new URL(fix.chatUrl(prompt)).searchParams.get('q'), prompt);
   assert.strictEqual(fix.chatUrl('x'.repeat(7000)), 'https://claude.ai/new');
 });
+
+test('checkFix: refuses the prompt echoed back or prose without LaTeX, warns on big size changes', () => {
+  const frag = '\\documentclass{article}\n\\begin{document}\nHello \\foo world.\n\\end{document}';
+  const garbage = ' empty and explain what to do.\nReply in exactly this format and nothing else:\n<explanation>x</explanation>\n<fix>the complete corrected fragment';
+  assert.ok(fix.checkFix(garbage, frag).reject);
+  assert.ok(fix.checkFix('Sure! I removed the unknown command for you.', frag).reject);
+  assert.ok(fix.checkFix('\\foo\n' + 'x\n'.repeat(30), frag).warn);
+  assert.ok(fix.checkFix('\\documentclass{article}\n\\begin{document}', 'a \\b\nc\nd\ne\nf\ng').warn);
+  assert.deepStrictEqual(fix.checkFix('\\documentclass{article}\n\\begin{document}\nHello world.\n\\end{document}', frag), {});
+});

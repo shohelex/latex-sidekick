@@ -288,6 +288,24 @@ test('free-account flow: a plain code block (no tags) copied by hand is still of
   assert.strictEqual(doc.getText().trim(), '\\documentclass{article}\n\\begin{document}\nHello world.\n\\end{document}');
   fs.rmSync(dir, { recursive: true, force: true });
 });
+test('free-account flow: text that is not a fix (a piece of the prompt, or plain prose) never changes the file', async () => {
+  delete process.env.LATEX_SIDEKICK_API_KEY;
+  const { dir, file } = tempDoc('Hello \\foo world.');
+  const doc = await vscode.workspace.openTextDocument(file);
+  await vscode.window.showTextDocument(doc);
+  await build();
+  const before = doc.getText();
+  const err = (await state()).lastIssues.issues.find((i) => i.severity === 'error');
+  const out = await vscode.commands.executeCommand('latexEditor.ai.fixInChat', err, { noOpen: true, watch: false });
+  const piece = out.prompt.slice(out.prompt.indexOf('empty and explain'), out.prompt.indexOf('<fix>') + 5 + 60);   // what selecting the question in the chat gives
+  for (const junk of [piece, 'Sure, I removed the unknown command for you.', out.prompt]) {
+    await vscode.env.clipboard.writeText(junk);
+    const r = await vscode.commands.executeCommand('latexEditor.ai.applyClipboardFix', { apply: true });
+    assert.ok(!r || !r.applied, 'junk was applied: ' + junk.slice(0, 40));
+    assert.strictEqual(doc.getText(), before, 'file changed by junk: ' + junk.slice(0, 40));
+  }
+  fs.rmSync(dir, { recursive: true, force: true });
+});
 // Optional: point IEEE_PAPER_DIR at a folder holding an IEEE template paper (main.tex, IEEEtran.cls, .bib).
 const ieee = process.env.IEEE_PAPER_DIR;
 if (ieee) test('an IEEEtran journal paper with BibTeX builds without errors', async () => {

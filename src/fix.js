@@ -74,6 +74,23 @@ function parseFixReply(reply) {
   };
 }
 
+// Text that only appears in our own prompt: a "fix" containing it is the prompt echoed back, never a real fix.
+const PROMPT_ECHO = /You fix LaTeX build problems|Reply in exactly this format|Preamble \(read-only|<fragment>|ONE fenced code block|complete corrected fragment/;
+
+/**
+ * Safety checks on a proposed replacement before it is shown for approval.
+ * { reject: reason } = never offer it; { warn: text } = offer it, but only after an explicit confirmation.
+ */
+function checkFix(fixText, fragment) {
+  if (PROMPT_ECHO.test(fixText)) return { reject: 'That text is part of the prompt, not a fix. Copy Claude\'s answer, not the question. Nothing was changed.' };
+  if (/\\[A-Za-z]/.test(fragment) && !/\\[A-Za-z]/.test(fixText)) return { reject: 'That text contains no LaTeX commands, so it cannot replace this source. Nothing was changed.' };
+  const before = fragment.split(/\r?\n/).length, after = fixText.split(/\r?\n/).length;
+  if ((before >= 4 && after < before * 0.5) || after > before * 2 + 5) {
+    return { warn: `This replaces ${before} lines with ${after}. Check the diff carefully: Claude should return the whole fragment, not a part of it.` };
+  }
+  return {};
+}
+
 /**
  * Pull the reply out of text copied from a chat window: the chat is asked to answer inside one code block,
  * so use that block's contents when the tags are inside it. Returns undefined if no tags are found.
@@ -120,4 +137,4 @@ function chatUrl(text) {
   return url.length <= 6000 ? url : 'https://claude.ai/new';
 }
 
-module.exports = { chatUrl, buildFixPrompt, parseFixReply, extractReply, planEdits, applyEdits, windowFor, anchorLine, FIX_SYSTEM };
+module.exports = { checkFix, chatUrl, buildFixPrompt, parseFixReply, extractReply, planEdits, applyEdits, windowFor, anchorLine, FIX_SYSTEM };

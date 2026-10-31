@@ -62,6 +62,11 @@ async function finishFix(ctx, reply, opts = {}) {
   const { doc, lines, eol, version, prompt } = ctx;
   const parsed = fix.parseFixReply(reply);
   const plan = fix.planEdits(lines, prompt.window, parsed, prompt.fragment);
+  const chk = parsed.fix !== undefined ? fix.checkFix(parsed.fix, prompt.fragment) : {};
+  if (chk.reject) {
+    vscode.window.showWarningMessage(chk.reject);
+    return { applied: false, rejected: chk.reject };
+  }
   const extra = plan.skippedPreamble.length ? ` Also add to your preamble: ${plan.skippedPreamble.join(' ')}` : '';
   if (!plan.edits.length) {
     vscode.window.showInformationMessage(`Claude: ${parsed.explanation || 'no change suggested.'}${extra}`);
@@ -72,7 +77,9 @@ async function finishFix(ctx, reply, opts = {}) {
     proposals.set(id, fix.applyEdits(lines, plan.edits).join(eol));
     const right = vscode.Uri.from({ scheme: SCHEME, path: '/' + path.basename(doc.uri.fsPath), query: id });
     await vscode.commands.executeCommand('vscode.diff', doc.uri, right, `Claude's fix for ${path.basename(doc.uri.fsPath)} (right side is the proposal)`);
-    const choice = await vscode.window.showInformationMessage(`${parsed.explanation}${extra}`, 'Apply fix', 'Discard');
+    const choice = chk.warn
+      ? await vscode.window.showWarningMessage(`${parsed.explanation}${extra}\n\n${chk.warn}`, { modal: true }, 'Apply fix')
+      : await vscode.window.showInformationMessage(`${parsed.explanation}${extra}`, 'Apply fix', 'Discard');
     proposals.delete(id);
     if (choice !== 'Apply fix') return { applied: false, explanation: parsed.explanation };
   }

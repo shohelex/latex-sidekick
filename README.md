@@ -52,7 +52,7 @@ git clone https://github.com/shohelex/latex-sidekick.git
 cd latex-sidekick
 npm install
 npx @vscode/vsce package
-code --install-extension latex-sidekick-0.3.3.vsix
+code --install-extension latex-sidekick-0.3.4.vsix
 ```
 
 Then reload VS Code. In VS Code you can also use Extensions â†’ `â€¦` â†’ **Install from VSIXâ€¦** and pick the `.vsix` file.
@@ -91,7 +91,7 @@ Each problem has a lightbulb (`Ctrl+.`) on its squiggle, and a **Fix with AI** b
 
 - **Add `\usepackage{â€¦}`** when a command or environment comes from a known package (`\includegraphics`, `\textcolor`, `\toprule`, `align`, `tabularx`, â€¦). Already-loaded packages are not added twice.
 - **Change a misspelled `\ref` or `\cite` key** to the closest label or `.bib` key in your project, or **add a reference by DOI**.
-- **Fix with Claude, no API key needed:** with no key set, the fix offers **Use my free Claude.ai account**. It copies a ready-made prompt and opens [claude.ai](https://claude.ai) (sign in, or create a free account). Paste the prompt, click the copy button on Claude's answer, then choose **Apply Claude's answer** (or run *LaTeX Editor: Apply Claude's Answer from Clipboard*). If Claude answers with plain code instead of the requested format, copy that code block and run the apply command; it is used as the replacement. You always review the diff first. Nothing is sent until you paste it yourself. (A claude.ai login cannot be used directly by an extension, which is why this is copy and paste.)
+- **Fix with Claude, no API key needed:** with no key set, the fix offers **Use my free Claude.ai account**. It copies a ready-made prompt and opens [claude.ai](https://claude.ai) (sign in, or create a free account). Paste the prompt, click the copy button on Claude's answer, then choose **Apply Claude's answer** (or run *LaTeX Editor: Apply Claude's Answer from Clipboard*). If Claude answers with plain code instead of the requested format, copy that code block and run the apply command; it is used as the replacement. You always review the diff first, and text that is not a plausible fix (part of the prompt, prose with no LaTeX) is refused, while a replacement that changes the number of lines a lot needs a second confirmation. Nothing is sent until you paste it yourself. (A claude.ai login cannot be used directly by an extension, which is why this is copy and paste.)
 - **Fix with Claude, automatic** (needs an Anthropic API key from console.anthropic.com): sends the message and the source lines around it, shows the proposed change as a side-by-side diff, and applies it only when you click **Apply fix** (one undo step). If a fix needs something only you know (a missing file or bibliography entry), Claude explains instead of guessing. The failed-build notification also offers **Fix with AI** for the first error, and *LaTeX Editor: Fix First Build Problem with AI* is in the Command Palette.
 
 What is recognised: LaTeX errors (undefined commands and environments, missing `$`, unbalanced braces, mismatched `\begin`/`\end`, missing files and images, Unicode characters, table and math mistakes, option clashes, and about 40 more), package and class errors (shown on *your* line, not inside the `.sty`), warnings (undefined references and citations, duplicate labels, missing characters, font substitutions, pdfTeX warnings), BibTeX and Biber problems (missing entries, syntax errors in the `.bib`, shown on the `.bib` line), overfull/underfull boxes, and setup problems (WSL, `latexmk`, `bibtex`/`biber` missing, main file not found, timeouts, no write permission).

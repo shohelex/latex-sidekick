@@ -2,7 +2,7 @@
   "name": "latex-sidekick",
   "displayName": "LaTeX Sidekick",
   "description": "Overleaf/Prism-style LaTeX writing in VS Code: build on save (WSL or native), live side-by-side PDF with click-to-jump, citations, outline, and an optional Claude writing assistant.",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "publisher": "local",
   "license": "Apache-2.0",
   "engines": {
