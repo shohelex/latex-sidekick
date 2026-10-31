@@ -210,3 +210,30 @@ test('parsers survive garbage and huge input quickly (no throw, no catastrophic 
   }
   assert.doesNotThrow(() => { fix.parseFixReply(rnd(5000)); fix.extractReply(rnd(5000)); fix.checkFix(rnd(2000), rnd(2000)); fix.chatUrl(rnd(9000)); });
 });
+
+test('initProject: adds .gitignore and settings once, never overwrites', () => {
+  const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+  const { initProject } = require('../src/project');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'init-'));
+  try {
+    let r = initProject(dir, { main: 'paper\\main.tex', disableWorkshop: true });
+    assert.strictEqual(r.done.length, 2);
+    assert.strictEqual(fs.readFileSync(path.join(dir, '.gitignore'), 'utf8'), '# LaTeX Sidekick build output\n.latex-build/\n');
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(dir, '.vscode', 'settings.json'), 'utf8')), { 'latexEditor.mainFile': 'paper/main.tex', 'latex-workshop.latex.autoBuild.run': 'never' });
+    r = initProject(dir, { main: 'paper/main.tex', disableWorkshop: true });   // second run changes nothing
+    assert.strictEqual(r.done.length, 0);
+    assert.strictEqual(fs.readFileSync(path.join(dir, '.gitignore'), 'utf8').match(/latex-build/g).length, 1);
+    // existing files: keep the user's lines and values
+    fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules\n*.aux');
+    fs.writeFileSync(path.join(dir, '.vscode', 'settings.json'), JSON.stringify({ 'latexEditor.mainFile': 'other.tex', 'editor.fontSize': 15 }));
+    r = initProject(dir, { main: 'paper/main.tex' });
+    assert.strictEqual(fs.readFileSync(path.join(dir, '.gitignore'), 'utf8'), 'node_modules\n*.aux\n\n# LaTeX Sidekick build output\n.latex-build/\n');
+    assert.strictEqual(JSON.parse(fs.readFileSync(path.join(dir, '.vscode', 'settings.json'), 'utf8'))['latexEditor.mainFile'], 'other.tex');
+    // settings with comments are left untouched
+    const withComment = '{\n  // mine\n  "editor.fontSize": 15\n}\n';
+    fs.writeFileSync(path.join(dir, '.vscode', 'settings.json'), withComment);
+    r = initProject(dir, { main: 'a.tex', gitignore: false });
+    assert.strictEqual(fs.readFileSync(path.join(dir, '.vscode', 'settings.json'), 'utf8'), withComment);
+    assert.match(r.skipped[0], /left alone/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

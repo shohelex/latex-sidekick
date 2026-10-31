@@ -394,6 +394,15 @@ test('robustness: whatever the AI service does, the file is untouched and the ex
   }
   await buildsAgainOk();
 });
+test('"Set Up This Project" prepares a folder when asked, and only then', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sidekick-init-'));
+  try {
+    const r = await vscode.commands.executeCommand('latexEditor.initProject', { dir, main: 'main.tex', yes: true });
+    assert.strictEqual(r.done.length >= 2, true, JSON.stringify(r));
+    assert.ok(fs.readFileSync(path.join(dir, '.gitignore'), 'utf8').includes('.latex-build/'));
+    assert.strictEqual(JSON.parse(fs.readFileSync(path.join(dir, '.vscode', 'settings.json'), 'utf8'))['latexEditor.mainFile'], 'main.tex');
+  } finally { rm(dir); }
+});
 // Optional: point IEEE_PAPER_DIR at a folder holding an IEEE template paper (main.tex, IEEEtran.cls, .bib).
 const ieee = process.env.IEEE_PAPER_DIR;
 if (ieee) test('an IEEEtran journal paper with BibTeX builds without errors', async () => {

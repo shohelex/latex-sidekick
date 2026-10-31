@@ -12,6 +12,7 @@ let lastPdf;
 let lastMain;
 
 const { runTool, cfg } = require('./exec');
+const { initProject } = require('./project');
 const { parseLog, parseBlg, diagnoseSetup, wslToWin, parseLabels, parseBib } = require('./parse');
 let lastIssues;
 const previewState = { layout: null, rendered: null, errors: [], renders: 0, pong: null };   // what the preview panel reported back (used by the integration test)
@@ -284,7 +285,29 @@ function activate(context) {
   });
   context.subscriptions.push(output, diagnostics, status,
     vscode.commands.registerCommand('latexEditor.compile', () => compile()),
-    vscode.commands.registerCommand('latexEditor.showLog', () => output.show(true)),
+    vscode.commands.registerCommand('latexEditor.initProject', async (opts = {}) => {
+      const ed = vscode.window.activeTextEditor;
+      const folderUri = opts.dir ? vscode.Uri.file(opts.dir)
+        : (ed && vscode.workspace.getWorkspaceFolder(ed.document.uri)?.uri) || (vscode.workspace.workspaceFolders || [])[0]?.uri;
+      if (!folderUri) { vscode.window.showInformationMessage('Open a folder first (File > Open Folder).'); return; }
+      const dir = folderUri.fsPath;
+      const main = opts.main !== undefined ? opts.main
+        : ed && /\.tex$/i.test(ed.document.fileName) ? path.relative(dir, resolveMain(ed.document)) : '';
+      const workshop = !!vscode.extensions.getExtension('james-yu.latex-workshop');
+      let chosen = { gitignore: opts.gitignore !== false, settings: opts.settings !== false };
+      if (!opts.yes) {
+        const picks = await vscode.window.showQuickPick([
+          { label: `.gitignore: ignore the build folder (${cfg().get('outDir')}/)`, key: 'gitignore', picked: true },
+          { label: `.vscode/settings.json: main file ${main || '(none)'}${workshop ? ', and turn off LaTeX Workshop auto-build' : ''}`, key: 'settings', picked: true },
+        ], { canPickMany: true, placeHolder: `Set up ${path.basename(dir)} for LaTeX Sidekick (nothing existing is overwritten)` });
+        if (!picks) return;
+        chosen = { gitignore: picks.some((p) => p.key === 'gitignore'), settings: picks.some((p) => p.key === 'settings') };
+      }
+      const r = initProject(dir, { main, outDir: cfg().get('outDir'), disableWorkshop: workshop, ...chosen });
+      const lines = [...r.done, ...r.skipped];
+      vscode.window.showInformationMessage(lines.length ? lines.join(' | ') : 'Nothing to do.');
+      return r;
+    }),    vscode.commands.registerCommand('latexEditor.showLog', () => output.show(true)),
     vscode.commands.registerCommand('latexEditor._state', () => ({ previewState, lastIssues, lastPdf, lastMain, panelOpen: !!panel, busy: running || !!queued })),
     // Test hooks (not listed in package.json): ping the preview to measure responsiveness.
     vscode.commands.registerCommand('latexEditor._injectFailure', () => { injectFailure = true; }),

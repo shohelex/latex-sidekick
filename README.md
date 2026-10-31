@@ -3,7 +3,7 @@
 A VS Code extension for writing LaTeX papers the way Overleaf and Prism do, but on your own machine.
 Press `Ctrl+S` and it builds with `latexmk` (inside WSL on Windows, or natively on Linux/macOS) and shows the PDF beside your source.
 
-> **Status: early (v0.3).** It is young software and not yet widely tested. Please report anything that breaks.
+> **Status: early (v0.4).** It is young software and not yet widely tested. Please report anything that breaks.
 
 ## Features
 
@@ -52,8 +52,10 @@ git clone https://github.com/shohelex/latex-sidekick.git
 cd latex-sidekick
 npm install
 npx @vscode/vsce package
-code --install-extension latex-sidekick-0.3.5.vsix
+code --install-extension latex-sidekick-0.4.0.vsix
 ```
+
+Or, in one step: `npm run install-local` (builds the package and installs it). The extension is installed once into VS Code and then works in every folder you open; nothing is added to your projects.
 
 Then reload VS Code. In VS Code you can also use Extensions â†’ `â€¦` â†’ **Install from VSIXâ€¦** and pick the `.vsix` file.
 
@@ -68,6 +70,10 @@ If the first build fails, the message will say whether the problem is the setup 
 ### Try it from source
 
 Open this folder in VS Code and press `F5`. A test window opens on `sample/`. Run `npm test` for the unit tests.
+
+### Using it in another project
+
+Open the project's folder, open a `.tex` file and press `Ctrl+S`. For a tidy setup, run *LaTeX Editor: Set Up This Project* from the Command Palette. It asks first, then adds `.latex-build/` to `.gitignore` and the main file to `.vscode/settings.json`. It never overwrites a line you already have, and leaves a settings file with comments alone. To give the package to someone else, send them the `.vsix` file (or this repository) and they run `code --install-extension latex-sidekick-0.4.0.vsix`.
 
 ### Using it next to other LaTeX extensions
 

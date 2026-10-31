@@ -5,3 +5,4 @@ sample/**
 .gitignore
 **/*.vsix
 **/.latex-build/**
+scripts/**
