@@ -7,11 +7,12 @@ let output;
 let diagnostics;
 let running = false;
 let queued = false;
+let savingForBuild = false;
 let lastPdf;
 let lastMain;
 
 const { runTool, cfg } = require('./exec');
-const { parseLog, diagnoseSetup } = require('./parse');
+const { parseLog, parseBlg, diagnoseSetup, wslToWin, parseLabels, parseBib } = require('./parse');
 let lastIssues;
 const previewState = { rendered: null, errors: [], renders: 0, pong: null };   // what the preview panel reported back (used by the integration test)
 const synctex = require('./synctex');
@@ -39,26 +40,69 @@ const SEVERITY = {
 
 /** Read the .log latexmk wrote (more complete than its console output); fall back to the console text. */
 function readIssues(main, consoleLog) {
-  const logFile = path.join(path.dirname(main), cfg().get('outDir'), path.basename(main).replace(/\.tex$/i, '.log'));
+  const dir = path.dirname(main);
+  const stem = path.join(dir, cfg().get('outDir'), path.basename(main).replace(/\.tex$/i, ''));
   let text = consoleLog;
-  try { text = fs.readFileSync(logFile, 'utf8'); } catch { /* use console output */ }
+  try { text = fs.readFileSync(stem + '.log', 'utf8'); } catch { /* use console output */ }
+  let bib = '';
+  try { bib = fs.readFileSync(stem + '.blg', 'utf8'); } catch { /* no bibliography step */ }
+  const fromLog = parseLog(text);
+  const citeKeys = new Set(fromLog.filter((i) => i.code === 'undefined-cite').map((i) => i.key));
+  const fromBib = parseBlg(bib).filter((i) => !(i.code === 'undefined-cite' && citeKeys.has(i.key)));   // the .log already says it
   const showTypesetting = cfg().get('showTypesettingNotes');
-  return parseLog(text)
+  // Files named in logs may be relative, absolute WSL paths, or missing; fall back to the main file.
+  const locate = (f) => {
+    if (!f) return main;
+    const p = path.resolve(dir, wslToWin(f));
+    if (fs.existsSync(p)) return p;
+    const q = path.join(dir, path.basename(f));
+    return fs.existsSync(q) ? q : main;
+  };
+  return [...fromLog, ...fromBib]
     .filter((it) => showTypesetting || it.kind !== 'typesetting')
-    .map((it) => ({ ...it, path: path.resolve(path.dirname(main), it.file || path.basename(main)) }));
+    .map((it) => ({ ...it, path: locate(it.file) }));
 }
+
+const issueIndex = new Map();   // "path|line|message" -> issue, so the lightbulb can find what a diagnostic was made from
+const issueKey = (fsPath, line, message) => `${fsPath.toLowerCase()}|${line}|${message}`;
 
 function publishIssues(issues) {
   diagnostics.clear();
+  issueIndex.clear();
   const byFile = new Map();
   for (const it of issues) {
     const line = Math.max(0, (it.line || 1) - 1);
-    const d = new vscode.Diagnostic(new vscode.Range(line, 0, line, 1000), it.hint ? `${it.message}\n→ ${it.hint}` : it.message, SEVERITY[it.severity]);
+    const open = vscode.workspace.textDocuments.find((t) => t.uri.fsPath.toLowerCase() === it.path.toLowerCase());
+    let range = new vscode.Range(line, 0, line, 1000);
+    if (open && line < open.lineCount) {
+      // Underline just the offending command or key when it can be found, otherwise the line's text.
+      const text = open.lineAt(line).text;
+      const needle = it.code === 'undefined-command' ? it.cmd : it.key;
+      const col = needle ? text.indexOf(needle) : -1;
+      range = col >= 0 ? new vscode.Range(line, col, line, col + needle.length) : new vscode.Range(line, text.search(/\S|$/), line, text.length);
+    }
+    const message = it.hint ? `${it.message}\n→ ${it.hint}` : it.message;
+    const d = new vscode.Diagnostic(range, message, SEVERITY[it.severity]);
     d.source = 'latex';
+    if (it.code) d.code = it.code;
+    issueIndex.set(issueKey(it.path, range.start.line, message), it);
     if (!byFile.has(it.path)) byFile.set(it.path, []);
     byFile.get(it.path).push(d);
   }
   for (const [f, ds] of byFile) diagnostics.set(vscode.Uri.file(f), ds);
+}
+
+async function candidates(kind) {
+  if (!lastMain) return [];
+  const dir = path.dirname(lastMain);
+  const files = await vscode.workspace.findFiles(new vscode.RelativePattern(dir, kind === 'label' ? '**/*.tex' : '**/*.bib'), `**/${cfg().get('outDir')}/**`, 100);
+  const found = new Set();
+  for (const f of files) {
+    let t = '';
+    try { t = fs.readFileSync(f.fsPath, 'utf8'); } catch { continue; }
+    (kind === 'label' ? parseLabels(t) : parseBib(t).map((e) => e.key)).forEach((k) => found.add(k));
+  }
+  return [...found];
 }
 
 const countOf = (issues, sev) => issues.filter((i) => i.severity === sev).length;
@@ -71,7 +115,8 @@ async function compile(doc) {
   }
   if (running) { queued = doc; return; }
   running = true;
-  await vscode.workspace.saveAll(false);
+  savingForBuild = true;   // saving here must not queue a second build through the on-save handler
+  try { await vscode.workspace.saveAll(false); } finally { savingForBuild = false; }
   const main = resolveMain(doc);
   output.clear();
   output.appendLine(`> compiling ${main}`);
@@ -102,8 +147,10 @@ async function compile(doc) {
     setStatus('$(error) ' + counts, `Build failed at ${stamp}. Click to build again.`);
     const text = setupProblem || (errors ? `LaTeX build failed: ${counts}.` : 'LaTeX build failed without a recognisable error. See the log.');
     // Not awaited: a toast left open must not block the next build.
-    vscode.window.showErrorMessage(text, 'Show log', ...(setupProblem ? ['Open settings'] : ['Show problems'])).then((choice) => {
-      if (choice === 'Show log') output.show(true);
+    const first = !setupProblem && issues.find((i) => i.severity === 'error');
+    vscode.window.showErrorMessage(text, ...(first ? ['Fix with AI'] : []), 'Show log', ...(setupProblem ? ['Open settings'] : ['Show problems'])).then((choice) => {
+      if (choice === 'Fix with AI') vscode.commands.executeCommand('latexEditor.ai.fixIssue', first);
+      else if (choice === 'Show log') output.show(true);
       else if (choice === 'Open settings') vscode.commands.executeCommand('workbench.action.openSettings', 'latexEditor');
       else if (choice === 'Show problems') vscode.commands.executeCommand('workbench.actions.view.problems');
     });
@@ -169,6 +216,7 @@ function openPreview(context) {
       }, () => vscode.window.showWarningMessage('Could not open ' + msg.path));
     }
     if (msg.type === 'showLog') output.show(true);
+    if (msg.type === 'fix' && lastIssues && lastIssues.issues[msg.index]) vscode.commands.executeCommand('latexEditor.ai.fixIssue', lastIssues.issues[msg.index]);
     if (msg.type === 'reverse' && lastMain) {
       synctex.reverse(msg.page, msg.x, msg.y, path.dirname(lastMain), lastPdf).then((ok) => { if (!ok) vscode.window.setStatusBarMessage('No source location for that spot', 3000); });
     }
@@ -183,11 +231,15 @@ function activate(context) {
   status.command = 'latexEditor.compile';
   require('./editing').register(context);
   require('./citations').register(context);
-  require('./ai').register(context);
+  require('./ai').register(context, { issues: () => lastIssues });
+  require('./quickfix').register(context, {
+    lookup: (uri, d) => issueIndex.get(issueKey(uri.fsPath, d.range.start.line, d.message)),
+    candidates,
+  });
   context.subscriptions.push(output, diagnostics, status,
     vscode.commands.registerCommand('latexEditor.compile', () => compile()),
     vscode.commands.registerCommand('latexEditor.showLog', () => output.show(true)),
-    vscode.commands.registerCommand('latexEditor._state', () => ({ previewState, lastIssues, lastPdf, lastMain, panelOpen: !!panel })),
+    vscode.commands.registerCommand('latexEditor._state', () => ({ previewState, lastIssues, lastPdf, lastMain, panelOpen: !!panel, busy: running || !!queued })),
     // Test hooks (not listed in package.json): ping the preview to measure responsiveness.
     vscode.commands.registerCommand('latexEditor._ping', () => { previewState.pong = null; if (panel) panel.webview.postMessage({ type: 'ping', t: Date.now() }); }),
     vscode.commands.registerCommand('latexEditor.openPreview', () => {
@@ -217,7 +269,7 @@ function activate(context) {
       vscode.window.showInformationMessage('Build files removed.');
     }),
     vscode.workspace.onDidSaveTextDocument((doc) => {
-      if (!cfg().get('compileOnSave') || !doc.fileName.endsWith('.tex')) return;
+      if (savingForBuild || !cfg().get('compileOnSave') || !doc.fileName.endsWith('.tex')) return;
       if (!panel && cfg().get('autoOpenPreview')) openPreview(context);
       compile(doc);
     }));

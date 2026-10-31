@@ -61,7 +61,8 @@ test('parseLog: errors, warnings, typesetting notes and hints', () => {
   assert.deepStrictEqual([by('error')[0].file, by('error')[0].line], ['main.tex', 12]);
   assert.match(by('error')[0].hint, /misspelled/);
   assert.match(by('error')[1].message, /foo\.sty/);
-  assert.match(by('error')[1].hint, /missing/i);
+  assert.match(by('error')[1].hint, /not installed/i);
+  assert.strictEqual(by('error')[1].code, 'missing-file');
   assert.strictEqual(by('warning').length, 3);
   assert.strictEqual(by('warning')[0].line, 20);
   assert.ok(!by('warning').some((w) => /There were undefined/.test(w.message)));
@@ -80,4 +81,90 @@ test('diagnoseSetup', () => {
   assert.match(p.diagnoseSetup('sh: 1: latexmk: not found'), /latexmk was not found/);
   assert.match(p.diagnoseSetup('[build timed out]'), /timed out/);
   assert.strictEqual(p.diagnoseSetup('all fine'), undefined);
+});
+
+
+test('parseLog: context, offending command, and the key of an undefined reference', () => {
+  const r = p.parseLog([
+    './main.tex:3: Undefined control sequence.',
+    'l.3 Hello \\includegraphics',
+    '                            {a.png}',
+    '',
+    "LaTeX Warning: Reference `fig:x' on page 1 undefined on input line 9.",
+  ].join('\n'));
+  assert.strictEqual(r[0].code, 'undefined-command');
+  assert.strictEqual(r[0].cmd, '\\includegraphics');
+  assert.match(r[0].context, /includegraphics \{a\.png\}/);
+  assert.match(r[0].hint, /usepackage\{graphicx\}/);
+  assert.strictEqual(r[1].code, 'undefined-ref');
+  assert.strictEqual(r[1].key, 'fig:x');
+});
+
+test('parseLog: an error inside a package is attributed to the user line that triggered it', () => {
+  const r = p.parseLog([
+    '/usr/share/texlive/foo.sty:120: Package foo Error: Something broke.',
+    'See the foo package documentation for explanation.',
+    'l.14 \\usefoo',
+    '',
+  ].join('\n'));
+  assert.strictEqual(r[0].file, undefined);
+  assert.strictEqual(r[0].line, 14);
+  assert.strictEqual(r[0].via, 'foo.sty');
+});
+
+test('parseLog: other warnings (pdfTeX, missing character, missing auxiliary file)', () => {
+  const r = p.parseLog('pdfTeX warning (ext4): destination with the same identifier\nMissing character: There is no ^^A in font cmr10!\nNo file main.bbl.\n');
+  assert.deepStrictEqual(r.map((x) => x.severity), ['warning', 'warning', 'warning']);
+});
+
+test('parseBlg: BibTeX and Biber problems land on the .bib file', () => {
+  const r = p.parseBlg([
+    'Warning--I didn\'t find a database entry for "nokey"',
+    'I was expecting a `,\' or `}\'---line 12 of file refs.bib',
+    'ERROR - BibTeX subsystem: /tmp/x/refs.bib_abc.utf8, line 9, syntax error: bad',
+  ].join('\n'));
+  assert.strictEqual(r[0].key, 'nokey');
+  assert.deepStrictEqual([r[1].file, r[1].line], ['refs.bib', 12]);
+  assert.deepStrictEqual([r[2].file, r[2].line], ['refs.bib', 9]);
+});
+
+test('diagnoseSetup: more setup problems', () => {
+  assert.match(p.diagnoseSetup('Latexmk: Missing input file: x.tex'), /main \.tex/);
+  assert.match(p.diagnoseSetup('biber: command not found'), /bibtex\/biber/);
+});
+
+test('packageFor / planPackage: add a missing \\usepackage once', () => {
+  assert.strictEqual(p.packageFor({ code: 'undefined-command', cmd: '\\toprule' }), 'booktabs');
+  assert.strictEqual(p.packageFor({ code: 'undefined-env', env: 'align' }), 'amsmath');
+  const text = '\\documentclass{article}\n\\usepackage{a}\n\\usepackage[x]{b, graphicx}\n\\begin{document}\n\\end{document}';
+  assert.strictEqual(p.planPackage(text, 'graphicx'), null);
+  assert.deepStrictEqual(p.planPackage(text, 'booktabs'), { line: 3, text: '\\usepackage{booktabs}' });
+  assert.deepStrictEqual(p.planPackage('\\documentclass{article}\n\\begin{document}', 'xcolor'), { line: 1, text: '\\usepackage{xcolor}' });
+});
+
+test('closest finds a likely typo and nothing for unrelated names', () => {
+  assert.strictEqual(p.closest('fig:resutls', ['fig:results', 'tab:a']), 'fig:results');
+  assert.strictEqual(p.closest('zzzzzz', ['fig:results', 'tab:a']), undefined);
+});
+
+const fix = require('../src/fix');
+
+test('fix: prompt window, reply parsing and edit planning', () => {
+  const lines = ['\\documentclass{article}', '\\usepackage{a}', '\\begin{document}', 'one', 'two \\toprule', 'three', '\\end{document}'];
+  const issue = { severity: 'error', message: 'Undefined control sequence.', line: 5, cmd: '\\toprule' };
+  const pr = fix.buildFixPrompt(issue, lines, 1);
+  assert.deepStrictEqual(pr.window, { start: 3, end: 6 });
+  assert.match(pr.user, /reported at line 2 of the fragment/);
+  assert.match(pr.user, /\\usepackage\{a\}/);
+  const parsed = fix.parseFixReply('<explanation>Removed it.</explanation>\n<fix>\none\ntwo\nthree\n</fix>\n<preamble>\\usepackage{booktabs}</preamble>');
+  assert.strictEqual(parsed.fix, 'one\ntwo\nthree');
+  const plan = fix.planEdits(lines, pr.window, parsed, pr.fragment);
+  assert.deepStrictEqual(fix.applyEdits(lines, plan.edits), ['\\documentclass{article}', '\\usepackage{a}', '\\usepackage{booktabs}', '\\begin{document}', 'one', 'two', 'three', '\\end{document}']);
+  // no tags: explanation only, nothing applied
+  const none = fix.parseFixReply('You need to install foo.sty.');
+  assert.strictEqual(none.fix, undefined);
+  assert.strictEqual(fix.planEdits(lines, pr.window, none, pr.fragment).edits.length, 0);
+  // a package that is already loaded is not added twice
+  const dup = fix.parseFixReply('<explanation>x</explanation><fix></fix><preamble>\\usepackage{a}</preamble>');
+  assert.strictEqual(fix.planEdits(lines, pr.window, dup, pr.fragment).edits.length, 0);
 });

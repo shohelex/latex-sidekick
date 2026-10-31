@@ -184,14 +184,19 @@
     issuesEl.replaceChildren();
     if (!list.length) issuesEl.appendChild(el('div', null, 'No errors or warnings.')).id = 'none';
     const order = { error: 0, warning: 1, info: 2 };
-    [...list].sort((a, b) => order[a.severity] - order[b.severity]).forEach((it) => {
+    list.map((it, index) => ({ it, index })).sort((a, b) => order[a.it.severity] - order[b.it.severity]).forEach(({ it, index }) => {
       const row = el('div', 'issue ' + it.severity);
       const head = el('div');
       head.appendChild(el('span', 'msg', it.message));
       const where = (it.file || '') + (it.line ? ':' + it.line : '');
       if (where) head.appendChild(el('span', 'loc', where));
       row.appendChild(head);
+      if (it.context) row.appendChild(el('div', 'ctx', it.context));
       if (it.hint) row.appendChild(el('div', 'hint', it.hint));
+      const fixBtn = el('button', 'fix', 'Fix with AI');
+      fixBtn.title = 'Send this message and the lines around it to Claude, then review the proposed change before it is applied';
+      fixBtn.onclick = (ev) => { ev.stopPropagation(); vscode.postMessage({ type: 'fix', index }); };
+      row.appendChild(fixBtn);
       row.onclick = () => vscode.postMessage({ type: 'goto', path: it.path, line: it.line });
       issuesEl.appendChild(row);
     });

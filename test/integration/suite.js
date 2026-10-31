@@ -16,6 +16,12 @@ async function until(fn, ms, what) {
   }
 }
 const state = () => vscode.commands.executeCommand('latexEditor._state');
+// Build, after any build already in flight (e.g. one queued by a save) has finished, and wait for it to end.
+async function build() {
+  await until(async () => !(await state()).busy, 120000, 'earlier build to finish');
+  await vscode.commands.executeCommand('latexEditor.compile');
+  await until(async () => !(await state()).busy, 120000, 'build to finish');
+}
 
 const tests = [];
 const test = (name, fn) => tests.push([name, fn]);
@@ -42,7 +48,7 @@ test('main.tex opens as LaTeX with word wrap on', async () => {
 test('building a good document produces a PDF and no errors', async () => {
   const pdf = path.join(sampleDir, '.latex-build', 'main.pdf');
   fs.rmSync(path.dirname(pdf), { recursive: true, force: true });
-  await vscode.commands.executeCommand('latexEditor.compile');
+  await build();
   assert.ok(fs.existsSync(pdf), 'PDF was not produced');
   const s = await state();
   assert.strictEqual(s.lastIssues.issues.filter((i) => i.severity === 'error').length, 0);
@@ -62,7 +68,7 @@ test('a broken document reports an error on the right line, with a hint', async 
   fs.writeFileSync(file, '\\documentclass{article}\n\\begin{document}\nHello \\foo world, see \\ref{nope}.\n\\end{document}\n');
   const doc = await vscode.workspace.openTextDocument(file);
   await vscode.window.showTextDocument(doc);
-  await vscode.commands.executeCommand('latexEditor.compile');
+  await build();
   const s = await state();
   const errs = s.lastIssues.issues.filter((i) => i.severity === 'error');
   assert.ok(errs.length >= 1, 'no error reported');
@@ -126,7 +132,7 @@ test('a 60-page paper renders without freezing the viewer', async () => {
   const doc = await vscode.workspace.openTextDocument(file);
   await vscode.window.showTextDocument(doc);
   await vscode.commands.executeCommand('latexEditor.openPreview');
-  await vscode.commands.executeCommand('latexEditor.compile');
+  await build();
   const tBuilt = Date.now();
   const s = await until(async () => { const x = await state(); return x.previewState.rendered && x.previewState.rendered.pages >= 60 ? x : null; }, 120000, 'all 60 pages to render');
   console.log('         build done -> all pages shown after ' + (Date.now() - tBuilt) + ' ms');
@@ -140,6 +146,101 @@ test('a 60-page paper renders without freezing the viewer', async () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+function tempDoc(body, extra = '') {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sidekick-fix-'));
+  const file = path.join(dir, 'main.tex');
+  fs.writeFileSync(file, '\\documentclass{article}\n' + extra + '\\begin{document}\n' + body + '\n\\end{document}\n');
+  return { dir, file };
+}
+
+test('lightbulb offers "Add \\usepackage" for a command whose package is missing, and the fix builds', async () => {
+  const { dir, file } = tempDoc('Some \\textcolor{red}{red} text.');
+  const doc = await vscode.workspace.openTextDocument(file);
+  await vscode.window.showTextDocument(doc);
+  await build();
+  const diags = vscode.languages.getDiagnostics(doc.uri).filter((d) => d.severity === vscode.DiagnosticSeverity.Error);
+  assert.ok(diags.length, 'no error for the missing package');
+  assert.strictEqual(doc.getText(diags[0].range), '\\textcolor', 'squiggle should cover just the command');
+  const actions = await vscode.commands.executeCommand('vscode.executeCodeActionProvider', doc.uri, diags[0].range);
+  const titles = actions.map((a) => a.title);
+  assert.ok(titles.includes('Add \\usepackage{xcolor}'), 'no package fix in: ' + titles.join(' | '));
+  assert.ok(titles.some((t) => t.startsWith('Fix with Claude')), 'no AI fix in: ' + titles.join(' | '));
+  await vscode.workspace.applyEdit(actions.find((a) => a.title === 'Add \\usepackage{xcolor}').edit);
+  await doc.save();
+  await build();
+  const s = await state();
+  assert.strictEqual(s.lastIssues.issues.filter((i) => i.severity === 'error').length, 0, JSON.stringify(s.lastIssues.issues));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('lightbulb suggests the nearest label for a misspelled \\ref', async () => {
+  const { dir, file } = tempDoc('\\section{A}\\label{sec:results}\nSee Section~\\ref{sec:resutls}.');
+  const doc = await vscode.workspace.openTextDocument(file);
+  await vscode.window.showTextDocument(doc);
+  await build();
+  const diags = vscode.languages.getDiagnostics(doc.uri).filter((d) => d.code === 'undefined-ref');
+  assert.ok(diags.length, 'undefined reference not reported');
+  const actions = await vscode.commands.executeCommand('vscode.executeCodeActionProvider', doc.uri, diags[0].range);
+  assert.ok(actions.some((a) => a.title === 'Change "sec:resutls" to "sec:results"'), actions.map((a) => a.title).join(' | '));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('Fix with AI sends the message and nearby source, and applies the fix (mock API)', async () => {
+  const http = require('http');
+  let received;
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      received = JSON.parse(body);
+      const frag = /<fragment>\n([\s\S]*?)\n<\/fragment>/.exec(received.messages[0].content)[1];
+      const reply = `<explanation>Removed the unknown command.</explanation>\n<fix>\n${frag.replace('\\foo ', '')}\n</fix>`;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ content: [{ type: 'text', text: reply }] }));
+    });
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  process.env.LATEX_SIDEKICK_API_URL = `http://127.0.0.1:${server.address().port}/v1/messages`;
+  process.env.LATEX_SIDEKICK_API_KEY = 'test-key';
+  try {
+    const { dir, file } = tempDoc('Hello \\foo world.');
+    const doc = await vscode.workspace.openTextDocument(file);
+    await vscode.window.showTextDocument(doc);
+    await build();
+    const err = (await state()).lastIssues.issues.find((i) => i.severity === 'error');
+    assert.ok(err, 'expected a build error');
+    const out = await vscode.commands.executeCommand('latexEditor.ai.fixIssue', err, { apply: true });
+    assert.ok(out && out.applied, 'fix not applied: ' + JSON.stringify(out));
+    assert.ok(received.messages[0].content.includes('Undefined control sequence'), 'error message not sent');
+    assert.ok(received.messages[0].content.includes('Hello \\foo world.'), 'source line not sent');
+    assert.ok(!doc.getText().includes('\\foo'), 'text not fixed: ' + doc.getText());
+    await doc.save();
+    await build();
+    assert.strictEqual((await state()).lastIssues.issues.filter((i) => i.severity === 'error').length, 0);
+    fs.rmSync(dir, { recursive: true, force: true });
+  } finally {
+    delete process.env.LATEX_SIDEKICK_API_URL;
+    delete process.env.LATEX_SIDEKICK_API_KEY;
+    server.close();
+  }
+});
+
+// Optional: point IEEE_PAPER_DIR at a folder holding an IEEE template paper (main.tex, IEEEtran.cls, .bib).
+const ieee = process.env.IEEE_PAPER_DIR;
+if (ieee) test('an IEEEtran journal paper with BibTeX builds without errors', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sidekick-ieee-'));
+  fs.cpSync(ieee, dir, { recursive: true, filter: (s) => !s.includes('.latex-build') });
+  const doc = await vscode.workspace.openTextDocument(path.join(dir, 'main.tex'));
+  await vscode.window.showTextDocument(doc);
+  await build();
+  const s = await state();
+  const errs = s.lastIssues.issues.filter((i) => i.severity === 'error');
+  console.log('         ' + s.lastIssues.issues.map((i) => i.severity + ': ' + i.message).join('\n         '));
+  assert.strictEqual(errs.length, 0, JSON.stringify(errs));
+  assert.ok(fs.existsSync(path.join(dir, '.latex-build', 'main.pdf')));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 async function run() {
   let failed = 0;
   for (const [name, fn] of tests) {
@@ -149,3 +250,4 @@ async function run() {
 }
 
 module.exports = { run };
+

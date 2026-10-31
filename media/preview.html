@@ -23,6 +23,11 @@
   .issue .msg { font-weight: 600; }
   .issue .loc { color: var(--vscode-descriptionForeground); margin-left: 6px; }
   .issue .hint { color: var(--vscode-descriptionForeground); margin-top: 2px; }
+  .issue .ctx { font: 11px var(--vscode-editor-font-family, monospace); margin-top: 2px; white-space: pre-wrap; word-break: break-all;
+                background: var(--vscode-textCodeBlock-background); padding: 1px 4px; }
+  .issue button.fix { margin-top: 4px; background: var(--vscode-button-background); color: var(--vscode-button-foreground);
+                      border: 0; padding: 2px 8px; cursor: pointer; font: 11px sans-serif; }
+  #issuesBtn.bad { color: var(--vscode-errorForeground); } #issuesBtn.warn { color: var(--vscode-editorWarning-foreground); }
   #none { padding: 8px; color: var(--vscode-descriptionForeground); }
   #bar .spacer { flex: 1; }
   #bar .bad { color: var(--vscode-errorForeground); } #bar .warn { color: var(--vscode-editorWarning-foreground); }

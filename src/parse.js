@@ -31,7 +31,7 @@ function countWords(text) {
     .replace(/\\(cite|ref|eqref|label|autoref|cref|Cref|includegraphics|input|include|usepackage|documentclass|bibliography|bibliographystyle)[a-zA-Z]*\*?(\[[^\]]*\])*\{[^}]*\}/g, ' ')
     .replace(/\\[a-zA-Z]+\*?/g, ' ')
     .replace(/[{}\\&~^_#]/g, ' ');
-  const words = t.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu);
+  const words = t.match(/[\p{L}\p{N}][\p{L}\p{N}'â€™-]*/gu);
   return words ? words.length : 0;
 }
 
@@ -122,86 +122,6 @@ function stripFences(s) {
   return m ? m[1] : s;
 }
 
-const HINTS = [
-  [/Undefined control sequence/i, 'A command is misspelled or its package is not loaded. Check the spelling, or add the right \\usepackage.'],
-  [/File [`'‘]?([^'’`]+)['’]? not found/i, 'A package or file is missing. Install the TeX package (e.g. `sudo apt install texlive-latex-extra`, or `tlmgr install <name>`), or fix the file name.'],
-  [/Missing \$ inserted/i, 'A math symbol (_, ^, \\alpha …) was used outside math mode. Wrap it in $ … $.'],
-  [/Runaway argument|File ended while scanning|Paragraph ended before/i, 'A { is not closed, or a command argument runs on too long. Check that braces match.'],
-  [/Extra \}|Too many \}'s/i, 'There is a } with no matching {.'],
-  [/Missing \\begin\{document\}/i, 'Text or a bad command appears before \\begin{document}. Check the preamble.'],
-  [/Environment (\S+) undefined/i, 'That environment is not defined. Load the package that provides it.'],
-  [/\\begin\{(\S+)\} on input line \d+ ended by \\end/i, 'A \\begin is closed by the wrong \\end. Check the environment names.'],
-  [/Reference .* undefined/i, 'The \\label does not exist or is misspelled. Build twice if you just added it.'],
-  [/Citation .* undefined/i, 'The key is not in your .bib file, or the bibliography has not been built yet.'],
-  [/Too many unprocessed floats/i, 'Too many figures/tables are waiting. Add \\clearpage or relax the placement options.'],
-  [/Emergency stop|Fatal error occurred/i, 'LaTeX stopped. Fix the first error above; later ones are often side effects.'],
-];
+const issues = require('./issues');
 
-function hintFor(message) {
-  const h = HINTS.find(([re]) => re.test(message));
-  return h ? h[1] : undefined;
-}
-
-/**
- * Parse a LaTeX .log (or latexmk output) into issues:
- * [{ severity: 'error'|'warning'|'info', kind, file?, line?, message, hint? }]
- */
-function parseLog(text) {
-  const lines = text.split(/\r?\n/);
-  const out = [];
-  const seen = new Set();
-  const add = (it) => {
-    const k = [it.severity, it.file, it.line, it.message].join('|');
-    if (seen.has(k)) return;
-    seen.add(k);
-    it.hint = it.hint || hintFor(it.message);
-    out.push(it);
-  };
-  const SKIP = /^(There were undefined (references|citations)|Label\(s\) may have changed|Rerun to get)/i;
-  for (let i = 0; i < lines.length; i++) {
-    const l = lines[i];
-    let m;
-    if ((m = /^(.+?\.(?:tex|sty|cls|bib|bbx|cbx|def|cfg|clo|ltx)):(\d+): (.*)$/.exec(l))) {
-      add({ severity: 'error', kind: 'error', file: m[1].replace(/^\.\//, ''), line: parseInt(m[2], 10), message: m[3].replace(/^LaTeX Error: /, '').trim() });
-    } else if ((m = /^! (.*)$/.exec(l))) {
-      let line;
-      for (let j = i + 1; j < Math.min(i + 12, lines.length); j++) {
-        const n = /^l\.(\d+)/.exec(lines[j]);
-        if (n) { line = parseInt(n[1], 10); break; }
-      }
-      add({ severity: 'error', kind: 'error', line, message: m[1].replace(/^LaTeX Error: /, '').trim() });
-    } else if ((m = /^(LaTeX|Package (\S+)|Class (\S+)) (Font )?Warning: (.*)$/.exec(l))) {
-      let msg = m[5];
-      for (let j = i + 1; j < lines.length && lines[j].trim() !== '' && /^(\(\S+\)|\s)/.test(lines[j]); j++) {
-        msg += ' ' + lines[j].replace(/^\(\S+\)\s*/, '').trim();
-      }
-      msg = msg.replace(/\s+/g, ' ').trim();
-      if (SKIP.test(msg)) continue;
-      const ln = /on input line (\d+)/.exec(msg);
-      const who = m[2] || m[3];
-      add({ severity: 'warning', kind: 'warning', line: ln ? parseInt(ln[1], 10) : undefined, message: (who ? `[${who}] ` : '') + msg.replace(/\s*on input line \d+\.?$/, '') });
-    } else if ((m = /^(Overfull|Underfull) \\([hv])box \(([^)]*)\)(.*)$/.exec(l))) {
-      const r = /lines (\d+)--(\d+)|line (\d+)/.exec(m[4]);
-      const line = r ? parseInt(r[1] || r[3], 10) : undefined;
-      add({ severity: 'info', kind: 'typesetting', line, message: `${m[1]} ${m[2] === 'h' ? 'horizontal' : 'vertical'} box (${m[3]})`,
-        hint: m[1] === 'Overfull' ? 'Text sticks out into the margin. Rephrase, allow hyphenation, or use \\sloppy / a manual break.' : 'Spacing is stretched loosely here; usually cosmetic.' });
-    }
-  }
-  return out;
-}
-
-/** Recognise build failures that are about the setup, not the document. */
-function diagnoseSetup(log) {
-  if (/Failed to start wsl\.exe|Wsl\/|ERROR_PATH_NOT_FOUND|no installed distributions|WSL.*not (installed|enabled)/i.test(log)) {
-    return 'WSL is not available. Install it with `wsl --install`, or set latexEditor.useWSL to false to use a TeX install on Windows.';
-  }
-  if (/Failed to start (latexmk|synctex)|latexmk: (command )?not found|is not recognized as an internal|ENOENT|latexmk: .*not found/i.test(log)) {
-    return 'latexmk was not found. Install it (in WSL: `sudo apt install latexmk texlive-latex-extra`; on Windows/macOS: MiKTeX or TeX Live), then build again.';
-  }
-  if (/\[build timed out\]/.test(log)) {
-    return 'The build timed out. An infinite loop in the document is the usual cause; fix the first error, or raise latexEditor.buildTimeoutSeconds.';
-  }
-  return undefined;
-}
-
-module.exports = { parseLog, hintFor, diagnoseSetup, parseSections, countWords, parseBib, parseLabels, parseSynctex, wslToWin, stripFences, stripComments };
+module.exports = { parseSections, countWords, parseBib, parseLabels, parseSynctex, wslToWin, stripFences, stripComments, ...issues };

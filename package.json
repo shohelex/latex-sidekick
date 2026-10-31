@@ -2,7 +2,7 @@
   "name": "latex-sidekick",
   "displayName": "LaTeX Sidekick",
   "description": "Overleaf/Prism-style LaTeX writing in VS Code: build on save (WSL or native), live side-by-side PDF with click-to-jump, citations, outline, and an optional Claude writing assistant.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "local",
   "license": "Apache-2.0",
   "engines": {
@@ -48,11 +48,19 @@
       },
       {
         "command": "latexEditor.insert",
-        "title": "LaTeX Editor: Insert Symbol / Environment…"
+        "title": "LaTeX Editor: Insert Symbol / Environmentâ€¦"
       },
       {
         "command": "latexEditor.ai.edit",
         "title": "LaTeX Editor: Ask Claude to Edit Selection"
+      },
+      {
+        "command": "latexEditor.ai.fixFirstError",
+        "title": "LaTeX Editor: Fix First Build Problem with AI"
+      },
+      {
+        "command": "latexEditor.ai.fixIssue",
+        "title": "LaTeX Editor: Fix Build Problem with AI"
       },
       {
         "command": "latexEditor.ai.setApiKey",
@@ -64,6 +72,12 @@
       }
     ],
     "menus": {
+      "commandPalette": [
+        {
+          "command": "latexEditor.ai.fixIssue",
+          "when": "false"
+        }
+      ],
       "editor/title": [
         {
           "command": "latexEditor.openPreview",
@@ -184,6 +198,13 @@
           "type": "string",
           "default": "claude-sonnet-5-5",
           "description": "Claude model used by the writing assistant. Only the text you select is sent, and only when you run the command."
+        },
+        "latexEditor.ai.fixContextLines": {
+          "type": "number",
+          "default": 12,
+          "minimum": 2,
+          "maximum": 60,
+          "description": "'Fix with AI' sends the build message plus this many source lines either side of the reported line (and your preamble's package lines)."
         },
         "latexEditor.buildTimeoutSeconds": {
           "type": "number",

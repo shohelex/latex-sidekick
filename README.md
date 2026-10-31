@@ -3,7 +3,7 @@
 A VS Code extension for writing LaTeX papers the way Overleaf and Prism do, but on your own machine.
 Press `Ctrl+S` and it builds with `latexmk` (inside WSL on Windows, or natively on Linux/macOS) and shows the PDF beside your source.
 
-> **Status: early (v0.2).** It is young software and not yet widely tested. Please report anything that breaks.
+> **Status: early (v0.3).** It is young software and not yet widely tested. Please report anything that breaks.
 
 ## Features
 
@@ -11,7 +11,7 @@ Press `Ctrl+S` and it builds with `latexmk` (inside WSL on Windows, or natively 
 - **Side-by-side PDF preview** with zoom and fit-width. It keeps your scroll position between builds.
 - **Click to jump (SyncTeX):** double-click the PDF to open the matching source line; `Ctrl+Alt+J` highlights the current source line in the PDF.
 - **Citations:** search your `.bib` files (`Ctrl+Alt+C`), `\cite{` and `\ref{` autocomplete, hover to see a reference, and "Add Reference by DOI" (fetches BibTeX from doi.org).
-- **Smart indentation:** Enter after `\begin{…}` indents, `\end{…}` moves back out, and Enter between them opens an indented line. Two-space indents.
+- **Smart indentation:** Enter after `\begin{â€¦}` indents, `\end{â€¦}` moves back out, and Enter between them opens an indented line. Two-space indents.
 - **Fast, lazy preview:** only the pages near your view are drawn, so long papers open instantly. `Ctrl+Alt+V` shows the last PDF at once and refreshes it after a rebuild.
 - **Word wrap on by default** for `.tex` files, so long lines flow onto the next line like in Overleaf (turn it off with `"[latex]": { "editor.wordWrap": "off" }` in your settings).
 - **Outline, word count, snippets,** an insert menu for symbols and environments, and `Ctrl+B` / `Ctrl+I` for bold and italic.
@@ -52,10 +52,10 @@ git clone https://github.com/shohelex/latex-sidekick.git
 cd latex-sidekick
 npm install
 npx @vscode/vsce package
-code --install-extension latex-sidekick-0.2.0.vsix
+code --install-extension latex-sidekick-0.3.0.vsix
 ```
 
-Then reload VS Code. In VS Code you can also use Extensions → `…` → **Install from VSIX…** and pick the `.vsix` file.
+Then reload VS Code. In VS Code you can also use Extensions â†’ `â€¦` â†’ **Install from VSIXâ€¦** and pick the `.vsix` file.
 
 ### 3. First use
 
@@ -81,9 +81,19 @@ If LaTeX Workshop is installed, turn off its build-on-save (`latex-workshop.late
 
 Every build reads the LaTeX log and reports problems three ways:
 
-- **Problems panel and editor squiggles:** errors (red), warnings (yellow) and typesetting notes such as overfull boxes (blue), on the right file and line. Each comes with a short plain-English hint where one is known (undefined command, missing package, unmatched brace, undefined reference or citation, …).
+- **Problems panel and editor squiggles:** errors (red), warnings (yellow) and typesetting notes such as overfull boxes (blue), on the right file and line. Each comes with a short plain-English hint where one is known (undefined command, missing package, unmatched brace, undefined reference or citation, â€¦).
 - **Issues list in the preview:** click **Issues** above the PDF to see them all, errors first. Click an item to jump to the source line. **Log** opens the full build log.
 - **Status bar:** shows the counts, for example `2 errors, 5 warnings`. Click it to build again.
+
+### Fixing problems
+
+Each problem has a lightbulb (`Ctrl+.`) on its squiggle, and a **Fix with AI** button in the Issues list. Fixes that need no AI come first:
+
+- **Add `\usepackage{â€¦}`** when a command or environment comes from a known package (`\includegraphics`, `\textcolor`, `\toprule`, `align`, `tabularx`, â€¦). Already-loaded packages are not added twice.
+- **Change a misspelled `\ref` or `\cite` key** to the closest label or `.bib` key in your project, or **add a reference by DOI**.
+- **Fix with Claude** (needs an API key): sends the message and the source lines around it, shows the proposed change as a side-by-side diff, and applies it only when you click **Apply fix** (one undo step). If a fix needs something only you know (a missing file or bibliography entry), Claude explains instead of guessing. The failed-build notification also offers **Fix with AI** for the first error, and *LaTeX Editor: Fix First Build Problem with AI* is in the Command Palette.
+
+What is recognised: LaTeX errors (undefined commands and environments, missing `$`, unbalanced braces, mismatched `\begin`/`\end`, missing files and images, Unicode characters, table and math mistakes, option clashes, and about 40 more), package and class errors (shown on *your* line, not inside the `.sty`), warnings (undefined references and citations, duplicate labels, missing characters, font substitutions, pdfTeX warnings), BibTeX and Biber problems (missing entries, syntax errors in the `.bib`, shown on the `.bib` line), overfull/underfull boxes, and setup problems (WSL, `latexmk`, `bibtex`/`biber` missing, main file not found, timeouts, no write permission).
 
 When a build fails, the preview keeps showing the last good PDF with a "Build failed" banner instead of going blank. Setup problems (WSL not installed, `latexmk` not found, a build that runs past `latexEditor.buildTimeoutSeconds`) get their own message with the fix and an **Open settings** button.
 
@@ -94,7 +104,7 @@ When a build fails, the preview keeps showing the last good PDF with a "Build fa
 | "WSL is not available" | Run `wsl --install`, or set `latexEditor.useWSL` to `false` |
 | "latexmk was not found" | Install it (see step 1), then build again |
 | `File 'xxx.sty' not found` | `sudo apt install texlive-latex-extra`, or `tlmgr install xxx` |
-| Preview is blank | Open View → Output → **LaTeX Editor** and look for a `[preview]` line |
+| Preview is blank | Open View â†’ Output â†’ **LaTeX Editor** and look for a `[preview]` line |
 | Two builds run on save | Turn off LaTeX Workshop's auto build (see above) |
 | Build never ends | Raise or lower `latexEditor.buildTimeoutSeconds`; check for an infinite loop |
 
@@ -106,6 +116,7 @@ Set `latexEditor.mainFile` to your root file, or put `%!TEX root = main.tex` at 
 
 Nothing leaves your machine except two things, and only when you ask:
 
+- **Fix with AI:** the build message, the source lines around the reported line (`latexEditor.ai.fixContextLines`, 12 each side by default) and your preamble's `\usepackage`/`\newcommand` lines are sent to the Anthropic API. Nothing is changed until you approve the diff.
 - **Claude assistant:** the text you selected is sent to the Anthropic API. Your API key is kept in VS Code's encrypted secret storage, never in a file. Set it with "LaTeX Editor: Set Anthropic API Key".
 - **Add Reference by DOI:** the DOI is sent to doi.org.
 
@@ -122,14 +133,17 @@ Nothing leaves your machine except two things, and only when you ask:
 | `latexEditor.outDir` | `.latex-build` | Build output folder |
 | `latexEditor.buildTimeoutSeconds` | `120` | Stop a build that runs longer than this |
 | `latexEditor.showTypesettingNotes` | `true` | List overfull/underfull box notes as information |
-| `latexEditor.ai.model` | `claude-sonnet-5-5` | Model for the writing assistant |
+| `latexEditor.ai.model` | `claude-sonnet-5-5` | Model for the writing assistant and Fix with AI |
+| `latexEditor.ai.fixContextLines` | `12` | Source lines sent either side of the problem for Fix with AI |
 
 ## Development
 
 ```
 npm test             # unit tests for the parsers (fast)
-npm run test:vscode  # opens a real VS Code in a temporary profile: builds a paper, renders the preview, checks errors and outline
+npm run test:vscode  # opens a real VS Code in a temporary profile: builds a paper, renders the preview, checks errors, quick fixes and Fix with AI
 ```
+
+The Fix with AI test talks to a small local mock of the API (`LATEX_SIDEKICK_API_URL` and `LATEX_SIDEKICK_API_KEY` environment variables; the endpoint cannot be changed from a workspace setting). Set `IEEE_PAPER_DIR` to a folder with an IEEEtran paper (`main.tex`, `IEEEtran.cls`, a `.bib`) to also build it as part of the run.
 
 ## License
 

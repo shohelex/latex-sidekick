@@ -1,5 +1,7 @@
 const vscode = require('vscode');
+const path = require('path');
 const { stripFences } = require('./parse');
+const fix = require('./fix');
 const { cfg } = require('./exec');
 
 const KEY = 'latexEditor.anthropicApiKey';
@@ -19,16 +21,20 @@ const PRESETS = [
   { label: 'Custom instruction…', instruction: null },
 ];
 
-async function callClaude(apiKey, instruction, text, signal) {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+// The endpoint can only be overridden by an environment variable (the tests use it), never by a workspace
+// setting, so a project you open cannot redirect your API key.
+const ENDPOINT = () => process.env.LATEX_SIDEKICK_API_URL || 'https://api.anthropic.com/v1/messages';
+
+async function callClaude(apiKey, system, user, signal) {
+  const res = await fetch(ENDPOINT(), {
     method: 'POST',
     signal,
     headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({
       model: cfg().get('ai.model'),
       max_tokens: 4096,
-      system: SYSTEM,
-      messages: [{ role: 'user', content: `Instruction: ${instruction}\n\nLaTeX fragment:\n${text}` }],
+      system,
+      messages: [{ role: 'user', content: user }],
     }),
   });
   if (!res.ok) {
@@ -37,17 +43,94 @@ async function callClaude(apiKey, instruction, text, signal) {
     throw new Error(`Anthropic API ${res.status}${detail ? ': ' + detail : ''}`);
   }
   const data = await res.json();
-  return stripFences((data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('')).replace(/\s+$/, '');
+  return (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
 }
 
-function register(context) {
+// ---- Fix with AI: proposed text is shown in a diff, and applied only after the user confirms ----
+const proposals = new Map();
+const SCHEME = 'latex-sidekick-fix';
+
+function toRange(doc, e) {
+  const n = doc.lineCount;
+  if (e.start === e.end) return new vscode.Range(Math.min(e.start, n), 0, Math.min(e.start, n), 0);
+  return e.end < n ? new vscode.Range(e.start, 0, e.end, 0) : new vscode.Range(e.start, 0, n - 1, doc.lineAt(n - 1).text.length);
+}
+
+async function fixIssue(context, issue, opts = {}) {
+  if (!issue) { vscode.window.showInformationMessage('No build problem to fix. Build first (Ctrl+S).'); return; }
+  let key = process.env.LATEX_SIDEKICK_API_KEY || await context.secrets.get(KEY);
+  if (!key) {
+    await vscode.commands.executeCommand('latexEditor.ai.setApiKey');
+    key = await context.secrets.get(KEY);
+    if (!key) return;
+  }
+  const file = issue.path || (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.uri.fsPath);
+  let doc;
+  try { doc = await vscode.workspace.openTextDocument(file); } catch { vscode.window.showWarningMessage('Could not open ' + file); return; }
+  const lines = doc.getText().split(/\r?\n/);
+  const eol = doc.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
+  const version = doc.version;
+  const prompt = fix.buildFixPrompt(issue, lines, cfg().get('ai.fixContextLines') || 12);
+  let reply;
+  try {
+    reply = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'Asking Claude to fix: ' + issue.message.slice(0, 60), cancellable: true },
+      (_p, token) => {
+        const ac = new AbortController();
+        token.onCancellationRequested(() => ac.abort());
+        return callClaude(key, prompt.system, prompt.user, ac.signal);
+      });
+  } catch (e) {
+    if (e.name !== 'AbortError') vscode.window.showErrorMessage(`AI fix failed: ${e.message}`);
+    return { error: e.message };
+  }
+  const parsed = fix.parseFixReply(reply);
+  const plan = fix.planEdits(lines, prompt.window, parsed, prompt.fragment);
+  const extra = plan.skippedPreamble.length ? ` Also add to your preamble: ${plan.skippedPreamble.join(' ')}` : '';
+  if (!plan.edits.length) {
+    vscode.window.showInformationMessage(`Claude: ${parsed.explanation || 'no change suggested.'}${extra}`);
+    return { applied: false, explanation: parsed.explanation };
+  }
+  if (!opts.apply) {
+    const id = String(Date.now());
+    proposals.set(id, fix.applyEdits(lines, plan.edits).join(eol));
+    const right = vscode.Uri.from({ scheme: SCHEME, path: '/' + path.basename(doc.uri.fsPath), query: id });
+    await vscode.commands.executeCommand('vscode.diff', doc.uri, right, `Claude's fix for ${path.basename(doc.uri.fsPath)} (right side is the proposal)`);
+    const choice = await vscode.window.showInformationMessage(`${parsed.explanation}${extra}`, 'Apply fix', 'Discard');
+    proposals.delete(id);
+    if (choice !== 'Apply fix') return { applied: false, explanation: parsed.explanation };
+  }
+  if (doc.version !== version) {
+    vscode.window.showWarningMessage('The file changed while Claude was working. Run the fix again.');
+    return { applied: false, explanation: parsed.explanation };
+  }
+  const we = new vscode.WorkspaceEdit();
+  for (const e of plan.edits) {
+    const r = toRange(doc, e);
+    const body = e.lines.join(eol);
+    if (e.start === e.end) we.insert(doc.uri, r.start, e.start >= doc.lineCount ? eol + body : body + eol);
+    else we.replace(doc.uri, r, e.end < doc.lineCount ? body + eol : body);
+  }
+  await vscode.workspace.applyEdit(we);
+  vscode.window.setStatusBarMessage('$(check) Claude fix applied (Ctrl+Z to undo). Save to rebuild.', 6000);
+  return { applied: true, explanation: parsed.explanation };
+}
+
+function register(context, host = {}) {
   context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider(SCHEME, { provideTextDocumentContent: (uri) => proposals.get(uri.query) || '' }),
     vscode.commands.registerCommand('latexEditor.ai.setApiKey', async () => {
       const key = await vscode.window.showInputBox({
         prompt: 'Anthropic API key (stored in VS Code\'s encrypted secret storage, never in files)',
         password: true, ignoreFocusOut: true,
       });
       if (key) { await context.secrets.store(KEY, key.trim()); vscode.window.showInformationMessage('API key saved.'); }
+    }),
+    vscode.commands.registerCommand('latexEditor.ai.fixIssue', (issue, opts) => fixIssue(context, issue, opts)),
+    vscode.commands.registerCommand('latexEditor.ai.fixFirstError', () => {
+      const list = (host.issues && host.issues() && host.issues().issues) || [];
+      const first = list.find((i) => i.severity === 'error') || list.find((i) => i.severity === 'warning');
+      return fixIssue(context, first);
     }),
     vscode.commands.registerCommand('latexEditor.ai.edit', async () => {
       const ed = vscode.window.activeTextEditor;
@@ -63,7 +146,7 @@ function register(context) {
       }
       const text = ed.document.getText(range);
       if (!text.trim()) return;
-      let key = await context.secrets.get(KEY);
+      let key = process.env.LATEX_SIDEKICK_API_KEY || await context.secrets.get(KEY);
       if (!key) {
         await vscode.commands.executeCommand('latexEditor.ai.setApiKey');
         key = await context.secrets.get(KEY);
@@ -79,7 +162,8 @@ function register(context) {
           (_p, token) => {
             const ac = new AbortController();
             token.onCancellationRequested(() => ac.abort());
-            return callClaude(key, instruction, text, ac.signal);
+            return callClaude(key, SYSTEM, `Instruction: ${instruction}\n\nLaTeX fragment:\n${text}`, ac.signal)
+              .then((t) => stripFences(t).replace(/\s+$/, ''));
           });
         await ed.edit((eb) => eb.replace(range, result));   // one undo step restores the original
         vscode.window.setStatusBarMessage('$(check) Claude edit applied (Ctrl+Z to undo)', 5000);
