@@ -75,6 +75,19 @@ function parseFixReply(reply) {
 }
 
 /**
+ * Pull the reply out of text copied from a chat window: the chat is asked to answer inside one code block,
+ * so use that block's contents when the tags are inside it. Returns undefined if no tags are found.
+ */
+function extractReply(text) {
+  const isReply = (s) => /<fix>|<explanation>/.test(s);
+  const whole = /^\s*```[^\n]*\n([\s\S]*)\n```\s*$/.exec(text);
+  if (whole && isReply(whole[1])) return whole[1];
+  const any = /```[^\n]*\n([\s\S]*?)\n```/.exec(text);
+  if (any && isReply(any[1])) return any[1];
+  return isReply(text) ? text : undefined;
+}
+
+/**
  * Turn a parsed reply into edits on the original lines: [{ start, end, lines }] (end exclusive).
  * Returns { edits, skippedPreamble }.
  */
@@ -101,4 +114,4 @@ function applyEdits(lines, edits) {
   return out;
 }
 
-module.exports = { buildFixPrompt, parseFixReply, planEdits, applyEdits, windowFor, anchorLine, FIX_SYSTEM };
+module.exports = { buildFixPrompt, parseFixReply, extractReply, planEdits, applyEdits, windowFor, anchorLine, FIX_SYSTEM };

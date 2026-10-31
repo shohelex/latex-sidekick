@@ -49,6 +49,7 @@ async function callClaude(apiKey, system, user, signal) {
 // ---- Fix with AI: proposed text is shown in a diff, and applied only after the user confirms ----
 const proposals = new Map();
 const SCHEME = 'latex-sidekick-fix';
+let pending;   // a fix waiting for the user to paste Claude's answer from claude.ai
 
 function toRange(doc, e) {
   const n = doc.lineCount;
@@ -56,34 +57,9 @@ function toRange(doc, e) {
   return e.end < n ? new vscode.Range(e.start, 0, e.end, 0) : new vscode.Range(e.start, 0, n - 1, doc.lineAt(n - 1).text.length);
 }
 
-async function fixIssue(context, issue, opts = {}) {
-  if (!issue) { vscode.window.showInformationMessage('No build problem to fix. Build first (Ctrl+S).'); return; }
-  let key = process.env.LATEX_SIDEKICK_API_KEY || await context.secrets.get(KEY);
-  if (!key) {
-    await vscode.commands.executeCommand('latexEditor.ai.setApiKey');
-    key = await context.secrets.get(KEY);
-    if (!key) return;
-  }
-  const file = issue.path || (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.uri.fsPath);
-  let doc;
-  try { doc = await vscode.workspace.openTextDocument(file); } catch { vscode.window.showWarningMessage('Could not open ' + file); return; }
-  const lines = doc.getText().split(/\r?\n/);
-  const eol = doc.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
-  const version = doc.version;
-  const prompt = fix.buildFixPrompt(issue, lines, cfg().get('ai.fixContextLines') || 12);
-  let reply;
-  try {
-    reply = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: 'Asking Claude to fix: ' + issue.message.slice(0, 60), cancellable: true },
-      (_p, token) => {
-        const ac = new AbortController();
-        token.onCancellationRequested(() => ac.abort());
-        return callClaude(key, prompt.system, prompt.user, ac.signal);
-      });
-  } catch (e) {
-    if (e.name !== 'AbortError') vscode.window.showErrorMessage(`AI fix failed: ${e.message}`);
-    return { error: e.message };
-  }
+/** Show the proposal as a diff, ask, and apply. `ctx` = { doc, lines, eol, version, prompt }. */
+async function finishFix(ctx, reply, opts = {}) {
+  const { doc, lines, eol, version, prompt } = ctx;
   const parsed = fix.parseFixReply(reply);
   const plan = fix.planEdits(lines, prompt.window, parsed, prompt.fragment);
   const extra = plan.skippedPreamble.length ? ` Also add to your preamble: ${plan.skippedPreamble.join(' ')}` : '';
@@ -116,6 +92,78 @@ async function fixIssue(context, issue, opts = {}) {
   return { applied: true, explanation: parsed.explanation };
 }
 
+const CHAT_FORMAT = 'Put your entire reply, tags included, inside ONE fenced code block (```), so it can be copied with the copy button.';
+
+async function fixIssue(context, issue, opts = {}) {
+  if (!issue) { vscode.window.showInformationMessage('No build problem to fix. Build first (Ctrl+S).'); return; }
+  const file = issue.path || (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.uri.fsPath);
+  let doc;
+  try { doc = await vscode.workspace.openTextDocument(file); } catch { vscode.window.showWarningMessage('Could not open ' + file); return; }
+  const lines = doc.getText().split(/\r?\n/);
+  const ctx = {
+    doc, lines, version: doc.version, eol: doc.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n',
+    prompt: fix.buildFixPrompt(issue, lines, cfg().get('ai.fixContextLines') || 12),
+  };
+
+  let key = process.env.LATEX_SIDEKICK_API_KEY || await context.secrets.get(KEY);
+  let mode = opts.mode || (key ? 'api' : undefined);
+  if (!mode) {
+    // No API key: a free claude.ai account works too, by copy and paste.
+    const pick = await vscode.window.showQuickPick([
+      { label: '$(comment-discussion) Use my free Claude.ai account', description: 'No API key. Copy the prompt, paste it into claude.ai, paste the answer back.', mode: 'chat' },
+      { label: '$(key) Use an Anthropic API key', description: 'Automatic. Needs a key from console.anthropic.com.', mode: 'api' },
+    ], { placeHolder: 'How should Claude fix this?' });
+    if (!pick) return;
+    mode = pick.mode;
+  }
+
+  if (mode === 'chat') {
+    const text = `${ctx.prompt.system}\n${CHAT_FORMAT}\n\n${ctx.prompt.user}`;
+    await vscode.env.clipboard.writeText(text);
+    pending = { ctx };
+    if (!opts.noOpen) vscode.env.openExternal(vscode.Uri.parse('https://claude.ai/new'));
+    if (!opts.noOpen) {
+      vscode.window.showInformationMessage(
+        'Prompt copied. Paste it into Claude (sign in or create a free account), click the copy button on its answer, then come back here.',
+        'Apply Claude\'s answer').then((c) => { if (c) vscode.commands.executeCommand('latexEditor.ai.applyClipboardFix'); });
+    }
+    return { pending: true, prompt: text };
+  }
+
+  if (!key) {
+    await vscode.commands.executeCommand('latexEditor.ai.setApiKey');
+    key = await context.secrets.get(KEY);
+    if (!key) return;
+  }
+  let reply;
+  try {
+    reply = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'Asking Claude to fix: ' + issue.message.slice(0, 60), cancellable: true },
+      (_p, token) => {
+        const ac = new AbortController();
+        token.onCancellationRequested(() => ac.abort());
+        return callClaude(key, ctx.prompt.system, ctx.prompt.user, ac.signal);
+      });
+  } catch (e) {
+    if (e.name !== 'AbortError') vscode.window.showErrorMessage(`AI fix failed: ${e.message}`);
+    return { error: e.message };
+  }
+  return finishFix(ctx, reply, opts);
+}
+
+async function applyClipboardFix(opts = {}) {
+  if (!pending) { vscode.window.showInformationMessage('Nothing is waiting. Use "Fix with AI" on a build problem first.'); return; }
+  const reply = fix.extractReply(await vscode.env.clipboard.readText());
+  if (reply === undefined) {
+    vscode.window.showWarningMessage('The clipboard does not hold Claude\'s answer. Copy the whole answer from claude.ai (the copy button on its code block) and try again.');
+    return { applied: false };
+  }
+  const { ctx } = pending;
+  const out = await finishFix(ctx, reply, opts);
+  if (out && (out.applied || out.explanation !== undefined)) pending = undefined;
+  return out;
+}
+
 function register(context, host = {}) {
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider(SCHEME, { provideTextDocumentContent: (uri) => proposals.get(uri.query) || '' }),
@@ -127,11 +175,9 @@ function register(context, host = {}) {
       if (key) { await context.secrets.store(KEY, key.trim()); vscode.window.showInformationMessage('API key saved.'); }
     }),
     vscode.commands.registerCommand('latexEditor.ai.fixIssue', (issue, opts) => fixIssue(context, issue, opts)),
-    vscode.commands.registerCommand('latexEditor.ai.fixFirstError', () => {
-      const list = (host.issues && host.issues() && host.issues().issues) || [];
-      const first = list.find((i) => i.severity === 'error') || list.find((i) => i.severity === 'warning');
-      return fixIssue(context, first);
-    }),
+    vscode.commands.registerCommand('latexEditor.ai.fixInChat', (issue, opts) => fixIssue(context, issue || firstProblem(host), { ...opts, mode: 'chat' })),
+    vscode.commands.registerCommand('latexEditor.ai.applyClipboardFix', (opts) => applyClipboardFix(opts)),
+    vscode.commands.registerCommand('latexEditor.ai.fixFirstError', () => fixIssue(context, firstProblem(host))),
     vscode.commands.registerCommand('latexEditor.ai.edit', async () => {
       const ed = vscode.window.activeTextEditor;
       if (!ed) return;
@@ -171,6 +217,11 @@ function register(context, host = {}) {
         if (e.name !== 'AbortError') vscode.window.showErrorMessage(`AI edit failed: ${e.message}`);
       }
     }));
+}
+
+function firstProblem(host) {
+  const list = (host.issues && host.issues() && host.issues().issues) || [];
+  return list.find((i) => i.severity === 'error') || list.find((i) => i.severity === 'warning');
 }
 
 module.exports = { register };

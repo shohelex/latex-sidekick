@@ -225,6 +225,25 @@ test('Fix with AI sends the message and nearby source, and applies the fix (mock
   }
 });
 
+test('Fix with a free Claude.ai account: prompt is copied, the pasted answer is reviewed and applied (no API key)', async () => {
+  delete process.env.LATEX_SIDEKICK_API_KEY;
+  const { dir, file } = tempDoc('Hello \\foo world.');
+  const doc = await vscode.workspace.openTextDocument(file);
+  await vscode.window.showTextDocument(doc);
+  await build();
+  const err = (await state()).lastIssues.issues.find((i) => i.severity === 'error');
+  const out = await vscode.commands.executeCommand('latexEditor.ai.fixInChat', err, { noOpen: true });
+  assert.ok(out && out.pending, 'chat flow did not start');
+  const clip = await vscode.env.clipboard.readText();
+  assert.ok(clip.includes('Undefined control sequence') && clip.includes('Hello \\foo world.') && clip.includes('<fragment>'), 'prompt not on the clipboard');
+  assert.ok(clip.includes('ONE fenced code block'), 'chat format instruction missing');
+  // The user pastes the prompt into claude.ai and copies the answer's code block back:
+  await vscode.env.clipboard.writeText('```\n<explanation>Removed the unknown command.</explanation>\n<fix>\n\\documentclass{article}\n\\begin{document}\nHello world.\n\\end{document}\n</fix>\n```');
+  const done = await vscode.commands.executeCommand('latexEditor.ai.applyClipboardFix', { apply: true });
+  assert.ok(done && done.applied, 'answer not applied: ' + JSON.stringify(done));
+  assert.ok(!doc.getText().includes('\\foo'), 'text not fixed: ' + doc.getText());
+  fs.rmSync(dir, { recursive: true, force: true });
+});
 // Optional: point IEEE_PAPER_DIR at a folder holding an IEEE template paper (main.tex, IEEEtran.cls, .bib).
 const ieee = process.env.IEEE_PAPER_DIR;
 if (ieee) test('an IEEEtran journal paper with BibTeX builds without errors', async () => {
@@ -250,4 +269,5 @@ async function run() {
 }
 
 module.exports = { run };
+
 

@@ -2,7 +2,7 @@
   "name": "latex-sidekick",
   "displayName": "LaTeX Sidekick",
   "description": "Overleaf/Prism-style LaTeX writing in VS Code: build on save (WSL or native), live side-by-side PDF with click-to-jump, citations, outline, and an optional Claude writing assistant.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "local",
   "license": "Apache-2.0",
   "engines": {
@@ -61,6 +61,14 @@
       {
         "command": "latexEditor.ai.fixIssue",
         "title": "LaTeX Editor: Fix Build Problem with AI"
+      },
+      {
+        "command": "latexEditor.ai.fixInChat",
+        "title": "LaTeX Editor: Fix First Build Problem with Free Claude.ai Account (no API key)"
+      },
+      {
+        "command": "latexEditor.ai.applyClipboardFix",
+        "title": "LaTeX Editor: Apply Claude's Answer from Clipboard"
       },
       {
         "command": "latexEditor.ai.setApiKey",

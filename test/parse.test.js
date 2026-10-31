@@ -168,3 +168,11 @@ test('fix: prompt window, reply parsing and edit planning', () => {
   const dup = fix.parseFixReply('<explanation>x</explanation><fix></fix><preamble>\\usepackage{a}</preamble>');
   assert.strictEqual(fix.planEdits(lines, pr.window, dup, pr.fragment).edits.length, 0);
 });
+
+test('extractReply: takes the answer out of a copied code block, or plain text', () => {
+  const inner = '<explanation>ok</explanation>\n<fix>\na\n</fix>';
+  assert.strictEqual(fix.extractReply('```\n' + inner + '\n```'), inner);
+  assert.strictEqual(fix.extractReply('Here you go:\n```xml\n' + inner + '\n```\nHope it helps'), inner);
+  assert.strictEqual(fix.extractReply(inner), inner);
+  assert.strictEqual(fix.extractReply('just some text'), undefined);
+});

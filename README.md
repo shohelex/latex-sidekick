@@ -52,7 +52,7 @@ git clone https://github.com/shohelex/latex-sidekick.git
 cd latex-sidekick
 npm install
 npx @vscode/vsce package
-code --install-extension latex-sidekick-0.3.0.vsix
+code --install-extension latex-sidekick-0.3.1.vsix
 ```
 
 Then reload VS Code. In VS Code you can also use Extensions â†’ `â€¦` â†’ **Install from VSIXâ€¦** and pick the `.vsix` file.
@@ -91,7 +91,8 @@ Each problem has a lightbulb (`Ctrl+.`) on its squiggle, and a **Fix with AI** b
 
 - **Add `\usepackage{â€¦}`** when a command or environment comes from a known package (`\includegraphics`, `\textcolor`, `\toprule`, `align`, `tabularx`, â€¦). Already-loaded packages are not added twice.
 - **Change a misspelled `\ref` or `\cite` key** to the closest label or `.bib` key in your project, or **add a reference by DOI**.
-- **Fix with Claude** (needs an API key): sends the message and the source lines around it, shows the proposed change as a side-by-side diff, and applies it only when you click **Apply fix** (one undo step). If a fix needs something only you know (a missing file or bibliography entry), Claude explains instead of guessing. The failed-build notification also offers **Fix with AI** for the first error, and *LaTeX Editor: Fix First Build Problem with AI* is in the Command Palette.
+- **Fix with Claude, no API key needed:** with no key set, the fix offers **Use my free Claude.ai account**. It copies a ready-made prompt and opens [claude.ai](https://claude.ai) (sign in, or create a free account). Paste the prompt, click the copy button on Claude's answer, then choose **Apply Claude's answer** (or run *LaTeX Editor: Apply Claude's Answer from Clipboard*). You still review the diff first. Nothing is sent until you paste it yourself. (A claude.ai login cannot be used directly by an extension, which is why this is copy and paste.)
+- **Fix with Claude, automatic** (needs an Anthropic API key from console.anthropic.com): sends the message and the source lines around it, shows the proposed change as a side-by-side diff, and applies it only when you click **Apply fix** (one undo step). If a fix needs something only you know (a missing file or bibliography entry), Claude explains instead of guessing. The failed-build notification also offers **Fix with AI** for the first error, and *LaTeX Editor: Fix First Build Problem with AI* is in the Command Palette.
 
 What is recognised: LaTeX errors (undefined commands and environments, missing `$`, unbalanced braces, mismatched `\begin`/`\end`, missing files and images, Unicode characters, table and math mistakes, option clashes, and about 40 more), package and class errors (shown on *your* line, not inside the `.sty`), warnings (undefined references and citations, duplicate labels, missing characters, font substitutions, pdfTeX warnings), BibTeX and Biber problems (missing entries, syntax errors in the `.bib`, shown on the `.bib` line), overfull/underfull boxes, and setup problems (WSL, `latexmk`, `bibtex`/`biber` missing, main file not found, timeouts, no write permission).
 
@@ -116,7 +117,7 @@ Set `latexEditor.mainFile` to your root file, or put `%!TEX root = main.tex` at 
 
 Nothing leaves your machine except two things, and only when you ask:
 
-- **Fix with AI:** the build message, the source lines around the reported line (`latexEditor.ai.fixContextLines`, 12 each side by default) and your preamble's `\usepackage`/`\newcommand` lines are sent to the Anthropic API. Nothing is changed until you approve the diff.
+- **Fix with AI (API key mode):** the build message, the source lines around the reported line (`latexEditor.ai.fixContextLines`, 12 each side by default) and your preamble's `\usepackage`/`\newcommand` lines are sent to the Anthropic API. Nothing is changed until you approve the diff. In claude.ai mode nothing is sent by the extension at all; you paste the prompt yourself.
 - **Claude assistant:** the text you selected is sent to the Anthropic API. Your API key is kept in VS Code's encrypted secret storage, never in a file. Set it with "LaTeX Editor: Set Anthropic API Key".
 - **Add Reference by DOI:** the DOI is sent to doi.org.
 

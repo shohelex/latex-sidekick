@@ -44,6 +44,9 @@ function register(context, host) {
         const ai = make('Fix with Claude: ' + issue.message.slice(0, 50));
         ai.command = { command: 'latexEditor.ai.fixIssue', title: 'Fix with Claude', arguments: [issue] };
         actions.push(ai);
+        const chat = make('Fix with free Claude.ai account (copy & paste, no API key)');
+        chat.command = { command: 'latexEditor.ai.fixInChat', title: 'Fix in Claude.ai', arguments: [issue] };
+        actions.push(chat);
         const log = make('Show build log');
         log.command = { command: 'latexEditor.showLog', title: 'Show build log' };
         actions.push(log);
