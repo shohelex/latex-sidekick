@@ -3,10 +3,7 @@ const cp = require('child_process');
 
 const cfg = () => vscode.workspace.getConfiguration('latexEditor');
 
-function toWslPath(p) {
-  const m = /^([a-zA-Z]):[\\/](.*)$/.exec(p);
-  return m ? `/mnt/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}` : p.replace(/\\/g, '/');
-}
+const { toWslPath } = require('./paths');
 
 const usingWsl = () => process.platform === 'win32' && cfg().get('useWSL');
 

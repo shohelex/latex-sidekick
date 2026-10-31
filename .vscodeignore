@@ -6,3 +6,4 @@ sample/**
 **/*.vsix
 **/.latex-build/**
 scripts/**
+skills/**

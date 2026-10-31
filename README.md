@@ -3,7 +3,18 @@
 A VS Code extension for writing LaTeX papers the way Overleaf and Prism do, but on your own machine.
 Press `Ctrl+S` and it builds with `latexmk` (inside WSL on Windows, or natively on Linux/macOS) and shows the PDF beside your source.
 
-> **Status: early (v0.4).** It is young software and not yet widely tested. Please report anything that breaks.
+## Two ways to use it
+
+They share the same error reading and hints, and each works without the other. You do not need Claude Code to use the extension.
+
+| | VS Code extension | Claude Code skill (optional) |
+|---|---|---|
+| For | Writing in VS Code: side-by-side PDF, click-to-jump, citations, problem list, Fix with AI | Letting Claude Code build a project, read the errors and fix them |
+| Needs | VS Code and a TeX install | Claude Code and a TeX install; no VS Code |
+| Install | `npm run install-local`, once, then it works in every folder | `node scripts/sidekick.js install-skill`, once, then it works in every project |
+
+The same tool also runs from any terminal, with no editor and no Claude Code: `node scripts/sidekick.js build main.tex` prints every error and warning with line, source text and hint (`--json` for scripts). See [The Claude Code skill and the command-line tool](#the-claude-code-skill-and-the-command-line-tool).
+> **Status: early (v0.5).** It is young software and not yet widely tested. Please report anything that breaks.
 
 ## Features
 
@@ -52,7 +63,7 @@ git clone https://github.com/shohelex/latex-sidekick.git
 cd latex-sidekick
 npm install
 npx @vscode/vsce package
-code --install-extension latex-sidekick-0.4.0.vsix
+code --install-extension latex-sidekick-0.5.0.vsix
 ```
 
 Or, in one step: `npm run install-local` (builds the package and installs it). The extension is installed once into VS Code and then works in every folder you open; nothing is added to your projects.
@@ -73,7 +84,7 @@ Open this folder in VS Code and press `F5`. A test window opens on `sample/`. Ru
 
 ### Using it in another project
 
-Open the project's folder, open a `.tex` file and press `Ctrl+S`. For a tidy setup, run *LaTeX Editor: Set Up This Project* from the Command Palette. It asks first, then adds `.latex-build/` to `.gitignore` and the main file to `.vscode/settings.json`. It never overwrites a line you already have, and leaves a settings file with comments alone. To give the package to someone else, send them the `.vsix` file (or this repository) and they run `code --install-extension latex-sidekick-0.4.0.vsix`.
+Open the project's folder, open a `.tex` file and press `Ctrl+S`. For a tidy setup, run *LaTeX Editor: Set Up This Project* from the Command Palette. It asks first, then adds `.latex-build/` to `.gitignore` and the main file to `.vscode/settings.json`. It never overwrites a line you already have, and leaves a settings file with comments alone. To give the package to someone else, send them the `.vsix` file (or this repository) and they run `code --install-extension latex-sidekick-0.5.0.vsix`.
 
 ### Using it next to other LaTeX extensions
 
@@ -151,6 +162,20 @@ Nothing leaves your machine except two things, and only when you ask:
 | `latexEditor.ai.model` | `claude-sonnet-5-5` | Model for the writing assistant and Fix with AI |
 | `latexEditor.ai.fixContextLines` | `12` | Source lines sent either side of the problem for Fix with AI |
 
+## The Claude Code skill and the command-line tool
+
+Optional. Skip this section if you do not use Claude Code.
+
+```
+node scripts/sidekick.js build main.tex          # build and list problems (exit 0 clean, 1 document problems, 2 setup problem)
+node scripts/sidekick.js doctor                  # are latexmk, pdflatex, synctex, bibtex, biber available?
+node scripts/sidekick.js setup . --open          # one step for a repo: install/update the VS Code extension, prepare the repo, open it in VS Code
+node scripts/sidekick.js init . --main main.tex  # only the repo files: .gitignore entry + .vscode/settings.json (never overwrites)
+node scripts/sidekick.js install-extension       # install the VS Code extension from the .vsix
+node scripts/sidekick.js install-skill           # copy the skill into ~/.claude/skills/latex-sidekick
+```
+
+`install-skill` copies `skills/latex-sidekick/SKILL.md`, the tool and the few modules it needs (and the `.vsix`, if built) into `~/.claude/skills/latex-sidekick`. That copy is self-contained: it does not need this repository. After that, in any project, ask Claude Code to "build this paper and fix the LaTeX errors", or "set this repo up for LaTeX in VS Code" (it runs `setup`: installs or updates the extension, prepares the repo, opens the paper), and the skill is used. It follows the rules in `SKILL.md`: smallest possible edits, never invent references or results, ask before installing anything. Remove the skill by deleting that folder. The skill is a plain text file plus the tool, so it also works as instructions for any other coding agent that can run a command.
 ## Development
 
 ```
