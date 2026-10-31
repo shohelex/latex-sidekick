@@ -8,7 +8,7 @@ Press `Ctrl+S` and it builds with `latexmk` (inside WSL on Windows, or natively 
 ## Features
 
 - **Build on save** with `latexmk` (pdflatex, xelatex or lualatex). Progress and a "build complete" message appear when it finishes; errors show up in the Problems panel on the right line.
-- **Side-by-side PDF preview** with zoom and fit-width. It keeps your scroll position between builds.
+- **Side-by-side PDF preview** that fits the width of its pane by default, so it re-fits when you split or resize the window (zoom with +/- to set your own size, or press Fit width to go back). It keeps your scroll position between builds. Source text wraps at the width of its own pane too, so splitting the editor re-wraps it.
 - **Click to jump (SyncTeX):** double-click the PDF to open the matching source line; `Ctrl+Alt+J` highlights the current source line in the PDF.
 - **Citations:** search your `.bib` files (`Ctrl+Alt+C`), `\cite{` and `\ref{` autocomplete, hover to see a reference, and "Add Reference by DOI" (fetches BibTeX from doi.org).
 - **Smart indentation:** Enter after `\begin{â€¦}` indents, `\end{â€¦}` moves back out, and Enter between them opens an indented line. Two-space indents.
@@ -52,7 +52,7 @@ git clone https://github.com/shohelex/latex-sidekick.git
 cd latex-sidekick
 npm install
 npx @vscode/vsce package
-code --install-extension latex-sidekick-0.3.1.vsix
+code --install-extension latex-sidekick-0.3.2.vsix
 ```
 
 Then reload VS Code. In VS Code you can also use Extensions â†’ `â€¦` â†’ **Install from VSIXâ€¦** and pick the `.vsix` file.

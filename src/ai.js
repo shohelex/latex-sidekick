@@ -94,6 +94,47 @@ async function finishFix(ctx, reply, opts = {}) {
 
 const CHAT_FORMAT = 'Put your entire reply, tags included, inside ONE fenced code block (```), so it can be copied with the copy button.';
 
+/**
+ * Open a URL in the default browser. VS Code's own openExternal re-encodes the query (breaking ?q=), so launch the
+ * browser directly with the URL as one argument (no shell, so & and % are safe). Remote windows use openExternal.
+ */
+function openUrl(url) {
+  if (vscode.env.remoteName) return vscode.env.openExternal(vscode.Uri.parse(url.split('?')[0]));
+  const cmd = process.platform === 'win32' ? ['rundll32', ['url.dll,FileProtocolHandler', url]]
+    : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
+  const child = require('child_process').spawn(cmd[0], cmd[1], { detached: true, stdio: 'ignore' });
+  child.on('error', () => vscode.env.openExternal(vscode.Uri.parse(url.split('?')[0])));
+  child.unref();
+}
+let stopWatching;
+/**
+ * While waiting for the answer, look at the clipboard every 1.5 s. Only the text is checked for the reply format;
+ * it is used only when it is a reply (not our own prompt). Stops on cancel, on success, or after 15 minutes.
+ */
+function watchForAnswer(promptText, opts) {
+  if (stopWatching) stopWatching();
+  vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: 'Waiting for Claude\'s answer: send the prompt in claude.ai, then click its copy button', cancellable: true },
+    (_p, token) => new Promise((resolve) => {
+      const started = Date.now();
+      let last = promptText, busy = false;
+      const done = () => { clearInterval(timer); stopWatching = undefined; resolve(); };
+      const timer = setInterval(async () => {
+        if (busy) return;
+        busy = true;
+        try {
+          if (Date.now() - started > 15 * 60 * 1000) { done(); return; }
+          const t = await vscode.env.clipboard.readText();
+          if (t === last) return;
+          last = t;
+          if (fix.extractReply(t) !== undefined && !t.includes('<fragment>')) { done(); applyClipboardFix({ apply: opts.apply }); }
+        } finally { busy = false; }
+      }, 1500);
+      stopWatching = done;
+      token.onCancellationRequested(done);
+    }));
+}
+
 async function fixIssue(context, issue, opts = {}) {
   if (!issue) { vscode.window.showInformationMessage('No build problem to fix. Build first (Ctrl+S).'); return; }
   const file = issue.path || (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.uri.fsPath);
@@ -119,14 +160,10 @@ async function fixIssue(context, issue, opts = {}) {
 
   if (mode === 'chat') {
     const text = `${ctx.prompt.system}\n${CHAT_FORMAT}\n\n${ctx.prompt.user}`;
-    await vscode.env.clipboard.writeText(text);
+    await vscode.env.clipboard.writeText(text);   // fallback if the chat opens empty
     pending = { ctx };
-    if (!opts.noOpen) vscode.env.openExternal(vscode.Uri.parse('https://claude.ai/new'));
-    if (!opts.noOpen) {
-      vscode.window.showInformationMessage(
-        'Prompt copied. Paste it into Claude (sign in or create a free account), click the copy button on its answer, then come back here.',
-        'Apply Claude\'s answer').then((c) => { if (c) vscode.commands.executeCommand('latexEditor.ai.applyClipboardFix'); });
-    }
+    if (!opts.noOpen) openUrl(fix.chatUrl(text));
+    if (opts.watch !== false) watchForAnswer(text, opts);
     return { pending: true, prompt: text };
   }
 
@@ -153,6 +190,7 @@ async function fixIssue(context, issue, opts = {}) {
 
 async function applyClipboardFix(opts = {}) {
   if (!pending) { vscode.window.showInformationMessage('Nothing is waiting. Use "Fix with AI" on a build problem first.'); return; }
+  if (stopWatching) stopWatching();
   const reply = fix.extractReply(await vscode.env.clipboard.readText());
   if (reply === undefined) {
     vscode.window.showWarningMessage('The clipboard does not hold Claude\'s answer. Copy the whole answer from claude.ai (the copy button on its code block) and try again.');

@@ -23,7 +23,8 @@
   let pages = [];            // { n, el, scale, w, h, canvas, state, stale, near, task, gen }
   let docGen = 0;            // bumps whenever the document or layout changes
   let scale = (vscode.getState() || {}).scale || 1.2;
-  let fitWidth = false;
+  // Fit the pane's width by default, so the PDF follows the window when it is split or resized; zooming by hand turns that off.
+  let fitWidth = (vscode.getState() || {}).fit !== false;
   let pending = null;        // highlight to apply once pages exist
   let reported = false;
   let t0 = 0;
@@ -39,7 +40,8 @@
     }
   }, { rootMargin: '1200px 0px' });
 
-  const scaleFor = (n) => (fitWidth ? Math.max(0.2, (window.innerWidth - 32) / sizes[n - 1].w) : scale);
+  const paneWidth = () => document.documentElement.clientWidth;   // excludes the scrollbar
+  const scaleFor = (n) => (fitWidth ? Math.max(0.2, (paneWidth() - 32) / sizes[n - 1].w) : scale);
 
   async function paint(pg) {
     if (!doc) return;
@@ -115,6 +117,7 @@
       pages.forEach((p) => observer.observe(p.el));
     }
     zoomEl.textContent = Math.round(pages[0].scale * 100) + '%';
+    vscode.postMessage({ type: 'layout', scale: pages[0].scale, width: paneWidth(), fit: fitWidth });
     infoEl.textContent = doc.numPages + ' page' + (doc.numPages === 1 ? '' : 's');
     if (pending) { const r = pending; pending = null; highlight(r); }
   }
@@ -147,14 +150,21 @@
   function setScale(s) {
     fitWidth = false;
     scale = Math.min(4, Math.max(0.4, s));
-    vscode.setState({ scale });
+    vscode.setState({ scale, fit: false });
     layout();
   }
   document.getElementById('in').onclick = () => setScale((fitWidth && pages[0] ? pages[0].scale : scale) * 1.15);
   document.getElementById('out').onclick = () => setScale((fitWidth && pages[0] ? pages[0].scale : scale) / 1.15);
-  document.getElementById('fit').onclick = () => { fitWidth = true; layout(); };
+  document.getElementById('fit').onclick = () => { fitWidth = true; vscode.setState({ scale, fit: true }); layout(); };
   let resizeTimer;
-  window.addEventListener('resize', () => { if (fitWidth) { clearTimeout(resizeTimer); resizeTimer = setTimeout(layout, 150); } });
+  let lastWidth = paneWidth();
+  new ResizeObserver(() => {
+    const w = paneWidth();
+    if (!fitWidth || w < 120 || Math.abs(w - lastWidth) < 4) return;   // hidden panel (width 0) or no real change
+    lastWidth = w;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(layout, 120);
+  }).observe(document.body);
 
   // ---- Issues list (errors / warnings / typesetting notes) ----
   const issuesEl = document.getElementById('issues');

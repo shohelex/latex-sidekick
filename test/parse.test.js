@@ -176,3 +176,9 @@ test('extractReply: takes the answer out of a copied code block, or plain text',
   assert.strictEqual(fix.extractReply(inner), inner);
   assert.strictEqual(fix.extractReply('just some text'), undefined);
 });
+
+test('chatUrl: the whole prompt survives in the ?q= parameter; huge prompts fall back to an empty chat', () => {
+  const prompt = 'Undefined control sequence.\nHello \\foo {world} & 50% <fragment>\nx\n</fragment> ünï';
+  assert.strictEqual(new URL(fix.chatUrl(prompt)).searchParams.get('q'), prompt);
+  assert.strictEqual(fix.chatUrl('x'.repeat(7000)), 'https://claude.ai/new');
+});

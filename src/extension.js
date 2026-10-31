@@ -14,7 +14,7 @@ let lastMain;
 const { runTool, cfg } = require('./exec');
 const { parseLog, parseBlg, diagnoseSetup, wslToWin, parseLabels, parseBib } = require('./parse');
 let lastIssues;
-const previewState = { rendered: null, errors: [], renders: 0, pong: null };   // what the preview panel reported back (used by the integration test)
+const previewState = { layout: null, rendered: null, errors: [], renders: 0, pong: null };   // what the preview panel reported back (used by the integration test)
 const synctex = require('./synctex');
 
 function resolveMain(doc) {
@@ -209,6 +209,7 @@ function openPreview(context) {
     if (msg.type === 'error') { previewState.errors.push(msg.message); output.appendLine('[preview] ' + msg.message); }
     if (msg.type === 'rendered') { previewState.rendered = { pages: msg.pages, width: msg.width, height: msg.height, ms: msg.ms }; previewState.renders++; }
     if (msg.type === 'pong') previewState.pong = msg;
+    if (msg.type === 'layout') previewState.layout = msg;
     if (msg.type === 'goto') {
       vscode.workspace.openTextDocument(msg.path).then((d) => {
         const pos = new vscode.Position(Math.max(0, (msg.line || 1) - 1), 0);

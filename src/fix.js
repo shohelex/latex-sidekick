@@ -114,4 +114,10 @@ function applyEdits(lines, edits) {
   return out;
 }
 
-module.exports = { buildFixPrompt, parseFixReply, extractReply, planEdits, applyEdits, windowFor, anchorLine, FIX_SYSTEM };
+/** claude.ai/new with the prompt pre-filled; a very long prompt gets an empty chat (it is on the clipboard too). */
+function chatUrl(text) {
+  const url = 'https://claude.ai/new?q=' + encodeURIComponent(text);
+  return url.length <= 6000 ? url : 'https://claude.ai/new';
+}
+
+module.exports = { chatUrl, buildFixPrompt, parseFixReply, extractReply, planEdits, applyEdits, windowFor, anchorLine, FIX_SYSTEM };

@@ -232,7 +232,7 @@ test('Fix with a free Claude.ai account: prompt is copied, the pasted answer is 
   await vscode.window.showTextDocument(doc);
   await build();
   const err = (await state()).lastIssues.issues.find((i) => i.severity === 'error');
-  const out = await vscode.commands.executeCommand('latexEditor.ai.fixInChat', err, { noOpen: true });
+  const out = await vscode.commands.executeCommand('latexEditor.ai.fixInChat', err, { noOpen: true, watch: false });
   assert.ok(out && out.pending, 'chat flow did not start');
   const clip = await vscode.env.clipboard.readText();
   assert.ok(clip.includes('Undefined control sequence') && clip.includes('Hello \\foo world.') && clip.includes('<fragment>'), 'prompt not on the clipboard');
@@ -243,6 +243,36 @@ test('Fix with a free Claude.ai account: prompt is copied, the pasted answer is 
   assert.ok(done && done.applied, 'answer not applied: ' + JSON.stringify(done));
   assert.ok(!doc.getText().includes('\\foo'), 'text not fixed: ' + doc.getText());
   fs.rmSync(dir, { recursive: true, force: true });
+});
+test('free-account flow: the answer is noticed on the clipboard without any extra click', async () => {
+  delete process.env.LATEX_SIDEKICK_API_KEY;
+  const { dir, file } = tempDoc('Hello \\foo world.');
+  const doc = await vscode.workspace.openTextDocument(file);
+  await vscode.window.showTextDocument(doc);
+  await build();
+  const err = (await state()).lastIssues.issues.find((i) => i.severity === 'error');
+  const out = await vscode.commands.executeCommand('latexEditor.ai.fixInChat', err, { noOpen: true, apply: true });
+  assert.ok(out && out.pending);
+  // the user copies something unrelated first, then the answer
+  await vscode.env.clipboard.writeText('unrelated text');
+  await sleep(2000);
+  assert.ok(doc.getText().includes('\\foo'), 'must not change anything for unrelated clipboard text');
+  await vscode.env.clipboard.writeText('```\n<explanation>Removed it.</explanation>\n<fix>\n\\documentclass{article}\n\\begin{document}\nHello world.\n\\end{document}\n</fix>\n```');
+  await until(() => !doc.getText().includes('\\foo'), 15000, 'the answer on the clipboard to be applied automatically');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('the PDF preview follows the width of its pane when the window layout changes', async () => {
+  const doc = await vscode.workspace.openTextDocument(path.join(sampleDir, 'main.tex'));
+  await vscode.window.showTextDocument(doc);
+  await vscode.commands.executeCommand('latexEditor.openPreview');
+  const first = await until(async () => (await state()).previewState.layout, 45000, 'preview layout');
+  assert.strictEqual(first.fit, true, 'fit-to-width should be the default');
+  await vscode.commands.executeCommand('workbench.action.toggleSidebarVisibility');   // changes the width of the editor area
+  const changed = await until(async () => { const l = (await state()).previewState.layout; return l && Math.abs(l.width - first.width) > 20 ? l : null; }, 15000, 'pane width to change');
+  assert.ok(Math.abs(changed.scale / first.scale - changed.width / first.width) < 0.15 || changed.scale !== first.scale, `zoom did not follow: ${JSON.stringify(first)} -> ${JSON.stringify(changed)}`);
+  assert.notStrictEqual(changed.scale, first.scale, 'zoom stayed the same after the pane changed width');
+  await vscode.commands.executeCommand('workbench.action.toggleSidebarVisibility');
 });
 // Optional: point IEEE_PAPER_DIR at a folder holding an IEEE template paper (main.tex, IEEEtran.cls, .bib).
 const ieee = process.env.IEEE_PAPER_DIR;
