@@ -127,7 +127,7 @@ function watchForAnswer(promptText, opts) {
           const t = await vscode.env.clipboard.readText();
           if (t === last) return;
           last = t;
-          if (fix.extractReply(t) !== undefined && !t.includes('<fragment>')) { done(); applyClipboardFix({ apply: opts.apply }); }
+          if (fix.extractReply(t) !== undefined && !t.includes('<fragment>')) { done(); applyClipboardFix({ apply: opts.apply, watcher: true }); }
         } finally { busy = false; }
       }, 1500);
       stopWatching = done;
@@ -191,7 +191,13 @@ async function fixIssue(context, issue, opts = {}) {
 async function applyClipboardFix(opts = {}) {
   if (!pending) { vscode.window.showInformationMessage('Nothing is waiting. Use "Fix with AI" on a build problem first.'); return; }
   if (stopWatching) stopWatching();
-  const reply = fix.extractReply(await vscode.env.clipboard.readText());
+  const clip = await vscode.env.clipboard.readText();
+  let reply = fix.extractReply(clip);
+  if (reply === undefined && !opts.watcher && clip.trim() && clip.length < 20000 && !clip.includes('<fragment>')) {
+    // Claude answered in its own format: use the copied code (one outer fence removed) as the replacement. The diff
+    // below is still shown, and nothing changes until it is approved.
+    reply = `<explanation>Using the text you copied as the replacement for the lines around the problem.</explanation>\n<fix>\n${stripFences(clip.trim())}\n</fix>`;
+  }
   if (reply === undefined) {
     vscode.window.showWarningMessage('The clipboard does not hold Claude\'s answer. Copy the whole answer from claude.ai (the copy button on its code block) and try again.');
     return { applied: false };

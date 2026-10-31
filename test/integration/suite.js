@@ -274,6 +274,20 @@ test('the PDF preview follows the width of its pane when the window layout chang
   assert.notStrictEqual(changed.scale, first.scale, 'zoom stayed the same after the pane changed width');
   await vscode.commands.executeCommand('workbench.action.toggleSidebarVisibility');
 });
+test('free-account flow: a plain code block (no tags) copied by hand is still offered as the fix', async () => {
+  delete process.env.LATEX_SIDEKICK_API_KEY;
+  const { dir, file } = tempDoc('Hello \\foo world.');
+  const doc = await vscode.workspace.openTextDocument(file);
+  await vscode.window.showTextDocument(doc);
+  await build();
+  const err = (await state()).lastIssues.issues.find((i) => i.severity === 'error');
+  await vscode.commands.executeCommand('latexEditor.ai.fixInChat', err, { noOpen: true, watch: false });
+  await vscode.env.clipboard.writeText('```latex\n\\documentclass{article}\n\\begin{document}\nHello world.\n\\end{document}\n```');
+  const done = await vscode.commands.executeCommand('latexEditor.ai.applyClipboardFix', { apply: true });
+  assert.ok(done && done.applied, JSON.stringify(done));
+  assert.strictEqual(doc.getText().trim(), '\\documentclass{article}\n\\begin{document}\nHello world.\n\\end{document}');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
 // Optional: point IEEE_PAPER_DIR at a folder holding an IEEE template paper (main.tex, IEEEtran.cls, .bib).
 const ieee = process.env.IEEE_PAPER_DIR;
 if (ieee) test('an IEEEtran journal paper with BibTeX builds without errors', async () => {
